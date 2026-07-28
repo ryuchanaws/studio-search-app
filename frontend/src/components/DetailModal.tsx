@@ -8,7 +8,7 @@
 
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { X, Navigation2, Heart, Sparkles, Star, TrendingUp, MapPin, Banknote, Camera, MessageSquare } from "lucide-react";
+import { X, Navigation2, Heart, Sparkles, Star, TrendingUp, TrainFront, Users, Banknote, Camera, MessageSquare } from "lucide-react";
 import type { Recommendation } from "../types";
 import { getScoreColor, getScoreLabel } from "../utils/score";
 import { getPresignedUploadUrl, uploadImageToS3, updateStudioImage } from "../api/client";
@@ -120,7 +120,7 @@ export const DetailModal = ({ recommendation: rec, isFavorite, onClose, onToggle
           </div>
         </div>
 
-        {/* 詳細スタッツグリッド: 評価・人気度・距離・費用 */}
+        {/* 詳細スタッツグリッド: 評価・人気度・最寄り駅距離・収容人数・費用 */}
         <div className="modal-stats">
           <div className="stat-item">
             <Star size={18} />
@@ -133,14 +133,21 @@ export const DetailModal = ({ recommendation: rec, isFavorite, onClose, onToggle
             <span className="stat-value">{Math.round(rec.popularityScore ?? 0)}</span>
           </div>
           <div className="stat-item">
-            <MapPin size={18} />
-            <span className="stat-label">距離</span>
-            <span className="stat-value">{rec.distance != null ? rec.distance.toFixed(1) : "0.0"}km</span>
+            <TrainFront size={18} />
+            <span className="stat-label">最寄り駅から</span>
+            <span className="stat-value">
+              {rec.stationDistanceKm != null ? `${Math.round(rec.stationDistanceKm * 1000)}m` : "不明"}
+            </span>
+          </div>
+          <div className="stat-item">
+            <Users size={18} />
+            <span className="stat-label">収容人数目安</span>
+            <span className="stat-value">{rec.capacityCategory ?? "不明"}</span>
           </div>
           <div className="stat-item">
             <Banknote size={18} />
             <span className="stat-label">費用</span>
-            <span className="stat-value">{!rec.cost || rec.cost === 0 ? "問合せ" : `¥${rec.cost.toLocaleString()}`}</span>
+            <span className="stat-value">{!rec.cost || rec.cost === 0 ? "問合せ" : `約¥${rec.cost.toLocaleString()}/時間`}</span>
           </div>
         </div>
 

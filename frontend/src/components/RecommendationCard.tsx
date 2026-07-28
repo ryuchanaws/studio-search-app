@@ -7,7 +7,7 @@
  */
 
 import { useState } from "react";
-import { Heart, Navigation2, Sparkles } from "lucide-react";
+import { Heart, Navigation2, Sparkles, TrainFront, Users } from "lucide-react";
 import type { Recommendation } from "../types";
 import { getScoreColor, getScoreLabel, formatScore, getRatingIcon, getPopularityIcon } from "../utils/score";
 import { ImagePreviewPopover } from "./ImagePreviewPopover";
@@ -117,12 +117,20 @@ export const RecommendationCard = ({
       {/* AI コメント: 2行で切り捨て表示 */}
       <p className="reason-text">{rec.reason}</p>
 
-      {/* メタ情報: 評価・人気度・距離・費用 */}
+      {/* メタ情報: 評価・人気度・最寄り駅からの距離・収容人数・費用 */}
       <div className="card-meta">
         <span>{getRatingIcon(rec.ratingScore ?? 0)} 評価 {Math.round(rec.ratingScore ?? 0)}</span>
         <span>{getPopularityIcon(rec.popularityScore ?? 0)} 人気 {Math.round(rec.popularityScore ?? 0)}</span>
-        <span>📍 {rec.distance != null ? rec.distance.toFixed(1) : "0.0"}km</span>
-        <span>💰 {!rec.cost || rec.cost === 0 ? "問合せ" : `¥${rec.cost.toLocaleString()}`}</span>
+        <span>
+          <TrainFront size={12} style={{ verticalAlign: "-2px" }} />{" "}
+          駅から{rec.stationDistanceKm != null ? Math.round(rec.stationDistanceKm * 1000) : "-"}m
+        </span>
+        {rec.capacityCategory && (
+          <span>
+            <Users size={12} style={{ verticalAlign: "-2px" }} /> {rec.capacityCategory}
+          </span>
+        )}
+        <span>💰 {!rec.cost || rec.cost === 0 ? "問合せ" : `約¥${rec.cost.toLocaleString()}/時間`}</span>
       </div>
 
       {/* アクションボタン: クリックイベントがカード全体に伝播しないよう stopPropagation */}

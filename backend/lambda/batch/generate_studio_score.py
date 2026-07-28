@@ -74,39 +74,51 @@ def _get_anthropic_api_key() -> str:
     return get_ssm_parameter(ANTHROPIC_API_KEY_PARAM)
 
 
+# 最寄り駅からの距離の正規化しきい値（km）。これ以上離れていると「駅から遠い」として
+# 満額のペナルティを課す。徒歩換算で概ね20分弱を想定した値
+STATION_DISTANCE_NORM_KM = 1.5
+# 最寄り駅距離が取得できなかった場合の中立値（km）。0（ペナルティ無し）にも
+# STATION_DISTANCE_NORM_KM（満額ペナルティ）にも寄せず、中間的な扱いにする
+DEFAULT_STATION_DISTANCE_KM = 0.8
+
+
 # ─── Score formula ───────────────────────────────────────────────────
 def calc_score(rating_score: float, popularity_score: float, appeal_score: float,
-               distance_km: float, cost_yen: float) -> float:
+               station_distance_km: float, cost_yen: float) -> float:
     """ルールベースのスコア式でスタジオの総合スコアを計算する。
 
     スコア式:
         score = rating_score     * 0.4
               + popularity_score * 0.2
               + appeal_score     * 0.2
-              - dist_norm        * 0.1
+              - station_dist_norm * 0.1
               - cost_norm        * 0.1
 
-    distance と cost は 0〜100 に正規化してからマイナス方向に加算する。
+    距離は「基準地点からの距離」ではなく「最寄り駅からのアクセス」を採用している。
+    ダンス・ヨガスタジオは天気等と違って毎日変化する要素が無く、
+    かつユーザー自身の現在地からの距離は「現在地から探す」機能側で別途扱うため、
+    ここでは駅からの近さ（通いやすさ）をスタジオ自体の固有スコアとして使う。
+    station_distance と cost は 0〜100 に正規化してからマイナス方向に加算する。
     重みの合計は0.8のため、満点条件でもスコア上限は80点になる
     （釣行AIアプリのcalc_score()と同じ構造）。
 
     Args:
-        rating_score     (float): 口コミ評価スコア（0〜100）
-        popularity_score (float): レビュー数（人気度）スコア（0〜100）
-        appeal_score     (float): 設備等から見た魅力度スコア（0〜100）
-        distance_km      (float): 基準地点からの距離（km）
-        cost_yen         (float): 利用料金（円、不明な場合は0）
+        rating_score        (float): 口コミ評価スコア（0〜100）
+        popularity_score     (float): レビュー数（人気度）スコア（0〜100）
+        appeal_score         (float): 設備等から見た魅力度スコア（0〜100）
+        station_distance_km (float): 最寄り駅からの距離（km）
+        cost_yen             (float): 利用料金（円、不明な場合は0）
 
     Returns:
         float: 総合スコア（0.0〜100.0）
     """
-    dist_norm = min(distance_km / 100.0, 1.0) * 100
+    station_dist_norm = min(station_distance_km / STATION_DISTANCE_NORM_KM, 1.0) * 100
     cost_norm = min(cost_yen / 5000.0, 1.0) * 100
     score = (
         rating_score     * 0.4
         + popularity_score * 0.2
         + appeal_score     * 0.2
-        - dist_norm * 0.1
+        - station_dist_norm * 0.1
         - cost_norm * 0.1
     )
     return max(0.0, min(100.0, score))
@@ -163,19 +175,22 @@ def estimate_studio_appeal(studio_name: str, facility_tags: list[str]) -> float:
 # ─── AI reason generation via Claude ─────────────────────────────────
 def generate_reason(studio_name: str, facility_tags: list[str], score: float,
                     rating_score: float, popularity_score: float,
-                    distance_km: float) -> str:
+                    station_distance_km: float, capacity_category: str,
+                    cost_yen: float) -> str:
     """Claude API を使ってスタジオの推薦理由を日本語で生成する。
 
     Anthropic APIキーが未設定の場合はフォールバック文言を返す。
     API エラー時もフォールバック文言を返し、Lambda を継続させる。
 
     Args:
-        studio_name      (str): スタジオ名
-        facility_tags    (list[str]): 設備タグ一覧
-        score            (float): 総合スコア（0〜100）
-        rating_score     (float): 口コミ評価スコア（0〜100）
-        popularity_score (float): 人気度スコア（0〜100）
-        distance_km      (float): 基準地点からの距離（km）
+        studio_name          (str): スタジオ名
+        facility_tags        (list[str]): 設備タグ一覧
+        score                (float): 総合スコア（0〜100）
+        rating_score         (float): 口コミ評価スコア（0〜100）
+        popularity_score     (float): 人気度スコア（0〜100）
+        station_distance_km (float): 最寄り駅からの距離（km）
+        capacity_category    (str): 収容人数の目安区分
+        cost_yen             (float): 利用料金（円、不明な場合は0）
 
     Returns:
         str: スタジオの推薦理由（2〜3文の日本語）
@@ -187,6 +202,8 @@ def generate_reason(studio_name: str, facility_tags: list[str], score: float,
     try:
         client = anthropic.Anthropic(api_key=api_key)
 
+        cost_line = f"利用料金: 約{cost_yen:.0f}円/時間" if cost_yen > 0 else "利用料金: 不明（公式サイトに記載なし）"
+
         prompt = f"""あなたはダンス・ヨガスタジオ探しのアドバイザーです。以下のデータを元に、
 利用者向けに「なぜこのスタジオが今おすすめか」を2〜3文の自然な日本語で説明してください。
 親しみやすい文体で。
@@ -196,7 +213,9 @@ def generate_reason(studio_name: str, facility_tags: list[str], score: float,
 総合スコア: {score:.0f}/100
 口コミ評価スコア: {rating_score:.0f}/100
 人気度スコア: {popularity_score:.0f}/100
-距離: {distance_km:.1f}km
+最寄り駅からの距離: {station_distance_km:.2f}km
+収容人数の目安: {capacity_category}
+{cost_line}
 
 説明文のみ出力してください（前置き不要）:"""
 
@@ -311,8 +330,18 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         studio_id:     str       = studio["studioId"]
         studio_name:   str       = studio.get("name", studio_id)
         facility_tags: list[str] = studio.get("facilityTags", ["鏡張り", "フローリング"])
+        capacity_category: str   = studio.get("capacityCategory", DEFAULT_CAPACITY_CATEGORY)
+        # distanceKm（基準地点からの距離）はスコアには使わず、フロントの
+        # 「現在地から探す」再ランキング機能向けにそのままRecommendationsへ引き継ぐ
         distance_km:   float     = float(studio.get("distanceKm", 20.0))
         cost_yen:      float     = float(studio.get("costYen", 0))
+        # 最寄り駅距離が未取得（discover_studios実行時にPlaces APIが失敗した等）の場合は
+        # 中立値にフォールバックする（ペナルティを最大にも最小にも寄せない）
+        nearest_station_m = studio.get("nearestStationDistanceM")
+        station_distance_km: float = (
+            float(nearest_station_m) / 1000.0 if nearest_station_m is not None
+            else DEFAULT_STATION_DISTANCE_KM
+        )
         rating = studio.get("rating")
         rating_val = float(rating) if rating is not None else None
         user_ratings_total = int(studio.get("userRatingsTotal", 0))
@@ -322,14 +351,15 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         appeal_score = estimate_studio_appeal(studio_name, facility_tags)
 
         # スコアはルールベースで決定論的に計算し、reason文だけAIに生成させる
-        score = calc_score(rating_score, popularity_score, appeal_score, distance_km, cost_yen)
+        score = calc_score(rating_score, popularity_score, appeal_score, station_distance_km, cost_yen)
 
         # reasonはスコアが大きく動いた/一定日数経過した場合のみClaudeで再生成し、
         # そうでなければ前回の文章を使い回す（API呼び出し削減）
         existing = existing_recs.get(studio_id)
         if _should_regenerate_reason(existing, score):
             reason = generate_reason(studio_name, facility_tags, score,
-                                     rating_score, popularity_score, distance_km)
+                                     rating_score, popularity_score,
+                                     station_distance_km, capacity_category, cost_yen)
             reason_regenerated += 1
         else:
             reason = existing["reason"]
@@ -337,15 +367,17 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         # studioId をPKとして put_item するため、同じスタジオの前回結果は上書きされる
         # （Recommendationsテーブルは履歴を持たず、スタジオごとに最新1件のみ保持する設計）
         rec_table.put_item(Item={
-            "studioId":         studio_id,
-            "score":            Decimal(str(round(score, 2))),
-            "facilityTags":     facility_tags,
-            "reason":           reason,
-            "distance":         Decimal(str(distance_km)),
-            "cost":             Decimal(str(cost_yen)),
-            "ratingScore":      Decimal(str(round(rating_score, 2))),
-            "popularityScore":  Decimal(str(round(popularity_score, 2))),
-            "updatedAt":        datetime.now(timezone.utc).isoformat(),
+            "studioId":            studio_id,
+            "score":               Decimal(str(round(score, 2))),
+            "facilityTags":        facility_tags,
+            "capacityCategory":    capacity_category,
+            "reason":              reason,
+            "distance":            Decimal(str(distance_km)),
+            "stationDistanceKm":   Decimal(str(round(station_distance_km, 2))),
+            "cost":                Decimal(str(cost_yen)),
+            "ratingScore":         Decimal(str(round(rating_score, 2))),
+            "popularityScore":     Decimal(str(round(popularity_score, 2))),
+            "updatedAt":           datetime.now(timezone.utc).isoformat(),
         })
         processed += 1
         print(f"  Processed: {studio_name} → score={score:.1f}")

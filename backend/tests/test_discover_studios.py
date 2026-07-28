@@ -32,6 +32,64 @@ def test_guess_facilities_without_api_key_returns_default():
     assert result == ["鏡張り", "フローリング"]
 
 
+def test_guess_capacity_without_api_key_returns_default():
+    """APIキーが空文字の場合、Claude呼び出しをせずデフォルト区分を返す。"""
+    result = discover_studios.guess_capacity("テストスタジオ", "テスト住所", api_key="")
+    assert result == discover_studios.DEFAULT_CAPACITY_CATEGORY
+
+
+def test_find_nearest_station_distance_m_returns_none_on_api_error(monkeypatch):
+    """Places Nearby Search呼び出しが失敗した場合はNoneを返し、例外を投げない。"""
+    def raise_error(url, params):
+        raise Exception("boom")
+
+    monkeypatch.setattr(discover_studios, "http_get_json", raise_error)
+    assert discover_studios.find_nearest_station_distance_m(35.681, 139.767, "fake-key") is None
+
+
+def test_find_nearest_station_distance_m_computes_distance(monkeypatch):
+    """Nearby Searchの先頭結果（最寄り駅）との距離をメートル単位で返す。"""
+    def fake_get_json(url, params):
+        return {
+            "status": "OK",
+            "results": [{"geometry": {"location": {"lat": 35.682, "lng": 139.767}}}],
+        }
+
+    monkeypatch.setattr(discover_studios, "http_get_json", fake_get_json)
+    distance = discover_studios.find_nearest_station_distance_m(35.681, 139.767, "fake-key")
+    assert distance is not None
+    assert 0 < distance < 500
+
+
+def test_fetch_place_website_returns_none_when_not_ok(monkeypatch):
+    """Place Details APIがOK以外を返した場合はNoneを返す。"""
+    monkeypatch.setattr(discover_studios, "http_get_json", lambda url, params: {"status": "NOT_FOUND"})
+    assert discover_studios.fetch_place_website("fake-place-id", "fake-key") is None
+
+
+def test_fetch_place_website_returns_url_when_present(monkeypatch):
+    """Place Details APIがwebsiteを返せばそのまま返す。"""
+    monkeypatch.setattr(
+        discover_studios, "http_get_json",
+        lambda url, params: {"status": "OK", "result": {"website": "https://example.com"}},
+    )
+    assert discover_studios.fetch_place_website("fake-place-id", "fake-key") == "https://example.com"
+
+
+def test_scrape_price_from_website_without_api_key_returns_none():
+    """Anthropic APIキー未設定時は取得を試みずNoneを返す。"""
+    assert discover_studios.scrape_price_from_website("https://example.com", api_key="") is None
+
+
+def test_scrape_price_from_website_returns_none_on_fetch_error(monkeypatch):
+    """サイト取得自体が失敗した場合はNoneを返し、例外を投げない。"""
+    def raise_error(req, timeout):
+        raise Exception("connection refused")
+
+    monkeypatch.setattr(discover_studios.urllib.request, "urlopen", raise_error)
+    assert discover_studios.scrape_price_from_website("https://example.com", api_key="fake-anthropic-key") is None
+
+
 @pytest.fixture
 def studios_table_for_discovery():
     """moto上にStudiosTable・アップロード用S3バケットを作成し、
@@ -68,6 +126,8 @@ def test_run_discovery_skips_duplicate_candidates(monkeypatch, studios_table_for
     ds = studios_table_for_discovery
     monkeypatch.setattr(ds, "get_ssm_parameter", lambda name: "fake-places-key")
     monkeypatch.setattr(ds, "guess_facilities", lambda *a, **k: ["鏡張り"])
+    monkeypatch.setattr(ds, "guess_capacity", lambda *a, **k: ds.DEFAULT_CAPACITY_CATEGORY)
+    monkeypatch.setattr(ds, "find_nearest_station_distance_m", lambda *a, **k: 300)
 
     table = ds.get_table(os.environ["STUDIOS_TABLE"])
     table.put_item(Item={
@@ -122,6 +182,8 @@ def test_run_discovery_sets_image_url_when_photo_reference_present(monkeypatch, 
     ds = studios_table_for_discovery
     monkeypatch.setattr(ds, "get_ssm_parameter", lambda name: "fake-places-key")
     monkeypatch.setattr(ds, "guess_facilities", lambda *a, **k: ["鏡張り"])
+    monkeypatch.setattr(ds, "guess_capacity", lambda *a, **k: ds.DEFAULT_CAPACITY_CATEGORY)
+    monkeypatch.setattr(ds, "find_nearest_station_distance_m", lambda *a, **k: 300)
     monkeypatch.setattr(ds, "fetch_and_store_place_photo", lambda ref, studio_id, key: "https://example.com/photo.jpg")
 
     def fake_search_places(query, api_key, location_bias=None):

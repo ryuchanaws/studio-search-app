@@ -24,6 +24,8 @@ export interface Studio {
   imageUrl?: string;
   /** 設備タグ（省略可・例: ["鏡張り", "フローリング"]） */
   facilityTags?: string[];
+  /** 収容人数の目安（省略可・Claudeによる推測、例: "小グループ向け（6〜10人）"） */
+  capacityCategory?: string;
 }
 
 /**
@@ -40,9 +42,14 @@ export interface Recommendation {
   facilityTags: string[];
   /** AI が生成した推薦理由（自然言語・日本語） */
   reason: string;
-  /** 基準地点からの距離（km） */
+  /** 基準地点からの距離（km）。「現在地から探す」の再ランキング計算にのみ使用し、
+   * スコア自体にはもう使われていない（スコアには stationDistanceKm を使用） */
   distance: number;
-  /** 利用料金（円。0 = 不明/情報なし） */
+  /** 最寄り駅からの距離（km）。スコアの距離ペナルティに使用する実際の値 */
+  stationDistanceKm?: number;
+  /** 収容人数の目安（省略可・Claudeによる推測） */
+  capacityCategory?: string;
+  /** 利用料金（円。0 = 不明/情報なし。公式サイトからのAI抽出値なので目安として扱う） */
   cost: number;
   /** 口コミ評価スコア（0〜100） */
   ratingScore: number;

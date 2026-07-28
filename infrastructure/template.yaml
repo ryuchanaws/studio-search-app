@@ -537,7 +537,10 @@ Resources:
     Properties:
       Handler: generate_studio_score.handler
       CodeUri: ../backend/lambda/batch/
-      Timeout: 420
+      # discover_studios.run_discovery が新規候補ごとに最寄り駅検索・公式サイト取得・
+      # Claude呼び出し2回（設備・収容人数）+ 価格抽出を行うようになったため、
+      # 初回の全国探索（候補数が多い）でも余裕を持たせてLambda上限の900秒に設定
+      Timeout: 900
       MemorySize: 512
       Policies:
         - SSMParameterReadPolicy:
@@ -592,7 +595,8 @@ Resources:
     Properties:
       Handler: discover_studios.handler
       CodeUri: ../backend/lambda/batch/
-      Timeout: 120
+      # 候補ごとに最寄り駅検索・公式サイト取得・Claude呼び出しが増えたため延長
+      Timeout: 300
       MemorySize: 256
       Policies:
         - SSMParameterReadPolicy:

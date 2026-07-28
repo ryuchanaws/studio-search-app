@@ -26,6 +26,8 @@ import json
 import os
 import math
 import random
+import re
+import urllib.request
 from decimal import Decimal
 from typing import Any, Optional
 from urllib.parse import quote
@@ -35,9 +37,22 @@ import anthropic
 from batch_common import http_get_json, http_get_bytes, get_table, get_ssm_parameter, s3
 
 PLACES_TEXT_SEARCH_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+PLACES_NEARBY_SEARCH_URL = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+PLACES_DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json"
 PLACES_PHOTO_URL = "https://maps.googleapis.com/maps/api/place/photo"
 # TOP3ヒーロー写真として使うため、そこそこの解像度を確保しつつ転送量を抑える
 PLACES_PHOTO_MAX_WIDTH = 800
+
+# 公式サイトの料金ページ取得は外部サイト（応答速度が読めない）が対象のため、
+# Places/Claude API向けのEXTERNAL_API_TIMEOUT_SEC（5秒）より少し長めに待つ
+WEBSITE_FETCH_TIMEOUT_SEC = 8
+# Claudeへの入力トークンを抑えるため、取得したHTMLはこの文字数までで切り詰める
+WEBSITE_TEXT_MAX_CHARS = 8000
+
+# 収容人数の目安（Claudeへの推測プロンプトと選択肢を一致させる）。
+# 実データが無いための推測にすぎないため、3段階の大まかな区分に留める
+CAPACITY_CATEGORIES = ["少人数向け（〜5人）", "小グループ向け（6〜10人）", "中〜大人数対応（11人〜）"]
+DEFAULT_CAPACITY_CATEGORY = CAPACITY_CATEGORIES[1]
 
 # ユーザー投稿・スタジオ写真のアップロード先（presignUploadHandler等と共通のバケット）
 UPLOADS_BUCKET = os.environ.get("UPLOADS_BUCKET", "")
@@ -131,6 +146,8 @@ def search_places(query: str, api_key: str, location_bias: Optional[dict[str, fl
                 "user_ratings_total": r.get("user_ratings_total"),
                 # スタジオ写真の自動取得に使う。候補に写真が無ければNone
                 "photo_reference": photos[0].get("photo_reference") if photos else None,
+                # 公式サイトURL取得（Place Details）・料金推定に使う
+                "place_id": r.get("place_id"),
             })
         return results
 
@@ -206,6 +223,162 @@ def guess_facilities(studio_name: str, address: str, api_key: str) -> list[str]:
         return default_facilities
 
 
+def guess_capacity(studio_name: str, address: str, api_key: str) -> str:
+    """Claude APIでスタジオ名・住所から収容人数の目安を推測する。
+
+    Google Places APIには収容人数のデータが無いため、店名から受ける印象での
+    大まかな推測にすぎない（guess_facilities()と同じ位置づけのヒューリスティック）。
+    APIキー未設定時・エラー時・想定外の応答時はデフォルト区分を返し、バッチを継続させる。
+
+    Args:
+        studio_name (str): スタジオ名
+        address     (str): 住所
+        api_key     (str): Anthropic API キー
+
+    Returns:
+        str: CAPACITY_CATEGORIES のいずれか1つ
+    """
+    if not api_key:
+        return DEFAULT_CAPACITY_CATEGORY
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        options = "\n".join(f"- {c}" for c in CAPACITY_CATEGORIES)
+        prompt = f"""次のレンタルスタジオの収容人数の目安を、以下の選択肢から1つだけ選んで
+その文字列をそのまま出力してください。前置き・説明は不要です。
+
+選択肢:
+{options}
+
+スタジオ名: {studio_name}（{address}）"""
+        response = client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=50,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        answer = response.content[0].text.strip()
+        return answer if answer in CAPACITY_CATEGORIES else DEFAULT_CAPACITY_CATEGORY
+
+    except Exception as e:
+        print(f"Claude capacity guess error: {e}")
+        return DEFAULT_CAPACITY_CATEGORY
+
+
+def find_nearest_station_distance_m(lat: float, lng: float, api_key: str) -> Optional[int]:
+    """Google Places Nearby Searchで最寄り駅を探し、スタジオからの距離（メートル）を返す。
+
+    rankby=distance を使うため radius は指定できない（Places APIの仕様）。
+    結果は距離順で返るため先頭が最寄り駅になる。
+
+    Args:
+        lat     (float): スタジオの緯度
+        lng     (float): スタジオの経度
+        api_key (str): Google Places API キー
+
+    Returns:
+        int | None: 最寄り駅までの距離（メートル、四捨五入）。取得失敗・駅が
+            見つからない場合はNone（呼び出し側はスコア計算で中立値にフォールバックする）
+    """
+    try:
+        data = http_get_json(PLACES_NEARBY_SEARCH_URL, {
+            "location": f"{lat},{lng}",
+            "type": "train_station",
+            "rankby": "distance",
+            "key": api_key,
+        })
+        if data.get("status") != "OK":
+            return None
+        results = data.get("results", [])
+        if not results:
+            return None
+        loc = results[0].get("geometry", {}).get("location", {})
+        if "lat" not in loc or "lng" not in loc:
+            return None
+        return round(haversine_km(lat, lng, loc["lat"], loc["lng"]) * 1000)
+
+    except Exception as e:
+        print(f"Nearest station lookup error: {e}")
+        return None
+
+
+def fetch_place_website(place_id: str, api_key: str) -> Optional[str]:
+    """Google Places Details APIでスタジオの公式サイトURLを取得する。
+
+    Args:
+        place_id (str): search_places() が返す候補のplace_id
+        api_key  (str): Google Places API キー
+
+    Returns:
+        str | None: 公式サイトURL。未登録・取得失敗の場合はNone
+    """
+    try:
+        data = http_get_json(PLACES_DETAILS_URL, {
+            "place_id": place_id,
+            "fields": "website",
+            "key": api_key,
+        })
+        if data.get("status") != "OK":
+            return None
+        return data.get("result", {}).get("website") or None
+
+    except Exception as e:
+        print(f"Place details (website) error: {e}")
+        return None
+
+
+def scrape_price_from_website(website_url: str, api_key: str) -> Optional[int]:
+    """スタジオの公式サイトを取得し、Claudeで利用料金（円/時間）の抽出を試みる。
+
+    実在しない金額を作り出さないよう、Claudeには「サイト内に明記されていなければ
+    "不明" とだけ答える」よう指示する。サイト取得失敗・Claude未設定・"不明"回答・
+    数値として解釈できない応答の場合はすべてNoneを返し、呼び出し側は「問合せ」表示に
+    フォールバックする（実データが無いことを偽の数値で埋めないための設計）。
+
+    Args:
+        website_url (str): スタジオの公式サイトURL
+        api_key     (str): Anthropic API キー
+
+    Returns:
+        int | None: 抽出できた場合は概算の円/時間。それ以外はNone
+    """
+    if not api_key:
+        return None
+
+    try:
+        req = urllib.request.Request(website_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=WEBSITE_FETCH_TIMEOUT_SEC) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+    except Exception as e:
+        print(f"Website fetch error ({website_url}): {e}")
+        return None
+
+    # script/style タグの中身はノイズになるだけなので簡易的に除去してから切り詰める
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    text = text[:WEBSITE_TEXT_MAX_CHARS]
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        prompt = f"""以下はレンタルスタジオ公式サイトのHTMLの抜粋です。
+1時間あたりの利用料金が明記されていれば、その金額を円単位の数字のみで出力してください
+（例: 3000）。複数プランがある場合は最も標準的な/安いプランの金額にしてください。
+サイト内に料金が明記されていない、または読み取れない場合は "不明" とだけ出力してください。
+数字か「不明」以外は出力しないでください。
+
+HTML抜粋:
+{text}"""
+        response = client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=20,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        answer = response.content[0].text.strip()
+        return int(answer) if answer.isdigit() else None
+
+    except Exception as e:
+        print(f"Claude price extraction error: {e}")
+        return None
+
+
 def run_discovery(location_bias: Optional[dict[str, float]] = None) -> dict[str, Any]:
     """新規レンタルスタジオ候補を探索し、Studios テーブルに追加する中核ロジック。
 
@@ -253,8 +426,26 @@ def run_discovery(location_bias: Optional[dict[str, float]] = None) -> dict[str,
             skipped += 1
             continue
 
+        # distanceKm は基準地点（東京 or 現在地）からの距離。スコア式には使わなくなったが、
+        # フロントの「現在地から探す」機能（recalcScoreForDistance）が距離ベースの
+        # 再ランキングに使い続けるため、これまでどおり算出・保存する
         distance_km = haversine_km(base_lat, base_lng, c["lat"], c["lng"])
         facility_tags = guess_facilities(c["name"], c["address"], anthropic_key)
+        capacity_category = guess_capacity(c["name"], c["address"], anthropic_key)
+
+        # 新しく見つかった候補にのみ発生する追加コスト（Places Nearby Search /
+        # Place Details / 外部サイト取得 / Claude呼び出し2回）。既存スタジオは
+        # 重複判定で上のcontinueにより到達しないため、スタジオ1件あたり1回きりで済む
+        nearest_station_m = find_nearest_station_distance_m(c["lat"], c["lng"], places_key)
+
+        cost_yen = 0
+        place_id = c.get("place_id")
+        if place_id:
+            website = fetch_place_website(place_id, places_key)
+            if website:
+                scraped_price = scrape_price_from_website(website, anthropic_key)
+                if scraped_price is not None:
+                    cost_yen = scraped_price
 
         studio_id = f"studio-{random.getrandbits(32):08x}"
 
@@ -269,8 +460,10 @@ def run_discovery(location_bias: Optional[dict[str, float]] = None) -> dict[str,
             "lat": Decimal(str(c["lat"])),
             "lng": Decimal(str(c["lng"])),
             "facilityTags": facility_tags,
+            "capacityCategory": capacity_category,
             "distanceKm": Decimal(str(round(distance_km, 1))),
-            "costYen": Decimal("0"),
+            "nearestStationDistanceM": nearest_station_m if nearest_station_m is not None else None,
+            "costYen": Decimal(str(cost_yen)),
             "description": c["address"],
             "imageUrl": image_url or "",
             "rating": Decimal(str(c["rating"])) if c.get("rating") is not None else None,

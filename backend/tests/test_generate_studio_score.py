@@ -6,29 +6,31 @@ import generate_studio_score
 
 
 def test_calc_score_perfect_conditions_no_distance_no_cost():
-    """好条件（rating/popularity/appeal全て100、距離・費用0）でも、
+    """好条件（rating/popularity/appeal全て100、駅距離・費用0）でも、
     重み(0.4+0.2+0.2=0.8)の合計が1.0未満なのでスコアは80.0が上限になる。"""
     score = generate_studio_score.calc_score(
-        rating_score=100, popularity_score=100, appeal_score=100, distance_km=0, cost_yen=0
+        rating_score=100, popularity_score=100, appeal_score=100, station_distance_km=0, cost_yen=0
     )
     assert score == 80.0
 
 
 def test_calc_score_worst_conditions():
-    """悪条件（全て0、距離・費用が上限超過）ならスコアは最低の0になる。"""
+    """悪条件（全て0、駅距離・費用が上限超過）ならスコアは最低の0になる。"""
     score = generate_studio_score.calc_score(
-        rating_score=0, popularity_score=0, appeal_score=0, distance_km=200, cost_yen=10000
+        rating_score=0, popularity_score=0, appeal_score=0, station_distance_km=3.0, cost_yen=10000
     )
     assert score == 0.0
 
 
-def test_calc_score_distance_penalty_is_capped():
-    """distance_km が正規化上限(100km)を超えても、ペナルティはそれ以上大きくならない。"""
+def test_calc_score_station_distance_penalty_is_capped():
+    """station_distance_km が正規化上限(STATION_DISTANCE_NORM_KM)を超えても、
+    ペナルティはそれ以上大きくならない。"""
+    cap = generate_studio_score.STATION_DISTANCE_NORM_KM
     score_at_cap = generate_studio_score.calc_score(
-        rating_score=80, popularity_score=80, appeal_score=80, distance_km=100, cost_yen=0
+        rating_score=80, popularity_score=80, appeal_score=80, station_distance_km=cap, cost_yen=0
     )
     score_over_cap = generate_studio_score.calc_score(
-        rating_score=80, popularity_score=80, appeal_score=80, distance_km=500, cost_yen=0
+        rating_score=80, popularity_score=80, appeal_score=80, station_distance_km=cap * 10, cost_yen=0
     )
     assert score_at_cap == score_over_cap
 
@@ -36,7 +38,7 @@ def test_calc_score_distance_penalty_is_capped():
 def test_calc_score_is_within_valid_range():
     """スコアは常に0.0〜100.0の範囲に収まる。"""
     score = generate_studio_score.calc_score(
-        rating_score=50, popularity_score=50, appeal_score=50, distance_km=50, cost_yen=2500
+        rating_score=50, popularity_score=50, appeal_score=50, station_distance_km=0.75, cost_yen=2500
     )
     assert 0.0 <= score <= 100.0
 
@@ -123,7 +125,8 @@ def test_generate_reason_without_api_key_returns_fallback_text(monkeypatch):
     monkeypatch.setattr(generate_studio_score, "_get_anthropic_api_key", lambda: "")
     reason = generate_studio_score.generate_reason(
         "テストスタジオ", ["鏡張り", "フローリング"], score=80.0,
-        rating_score=90.0, popularity_score=70.0, distance_km=5.0
+        rating_score=90.0, popularity_score=70.0, station_distance_km=0.3,
+        capacity_category="小グループ向け（6〜10人）", cost_yen=3000,
     )
     assert "テストスタジオ" in reason
     assert "鏡張り" in reason
