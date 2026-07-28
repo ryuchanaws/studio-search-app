@@ -26,6 +26,10 @@ export interface Studio {
   facilityTags?: string[];
   /** 収容人数の目安（省略可・Claudeによる推測、例: "小グループ向け（6〜10人）"） */
   capacityCategory?: string;
+  /** 公式サイトURL（省略可・Google Places Detailsから取得。予約は外部サイトに委ねる） */
+  website?: string;
+  /** 電話番号（省略可・Google Places Detailsから取得） */
+  phoneNumber?: string;
 }
 
 /**

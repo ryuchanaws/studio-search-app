@@ -301,29 +301,37 @@ def find_nearest_station_distance_m(lat: float, lng: float, api_key: str) -> Opt
         return None
 
 
-def fetch_place_website(place_id: str, api_key: str) -> Optional[str]:
-    """Google Places Details APIでスタジオの公式サイトURLを取得する。
+def fetch_place_details(place_id: str, api_key: str) -> dict[str, Optional[str]]:
+    """Google Places Details APIでスタジオの公式サイトURL・電話番号を取得する。
+
+    予約はアプリ内で完結させず、公式サイト or 電話番号への外部リンクとして
+    ユーザーに提供する（実際の予約処理はスタジオ側のシステムに委ねる設計）。
 
     Args:
         place_id (str): search_places() が返す候補のplace_id
         api_key  (str): Google Places API キー
 
     Returns:
-        str | None: 公式サイトURL。未登録・取得失敗の場合はNone
+        dict[str, str | None]: {"website": 公式サイトURL, "phoneNumber": 電話番号}。
+            未登録・取得失敗の場合はそれぞれNone
     """
     try:
         data = http_get_json(PLACES_DETAILS_URL, {
             "place_id": place_id,
-            "fields": "website",
+            "fields": "website,formatted_phone_number",
             "key": api_key,
         })
         if data.get("status") != "OK":
-            return None
-        return data.get("result", {}).get("website") or None
+            return {"website": None, "phoneNumber": None}
+        result = data.get("result", {})
+        return {
+            "website": result.get("website") or None,
+            "phoneNumber": result.get("formatted_phone_number") or None,
+        }
 
     except Exception as e:
-        print(f"Place details (website) error: {e}")
-        return None
+        print(f"Place details error: {e}")
+        return {"website": None, "phoneNumber": None}
 
 
 def scrape_price_from_website(website_url: str, api_key: str) -> Optional[int]:
@@ -439,9 +447,13 @@ def run_discovery(location_bias: Optional[dict[str, float]] = None) -> dict[str,
         nearest_station_m = find_nearest_station_distance_m(c["lat"], c["lng"], places_key)
 
         cost_yen = 0
+        website = None
+        phone_number = None
         place_id = c.get("place_id")
         if place_id:
-            website = fetch_place_website(place_id, places_key)
+            details = fetch_place_details(place_id, places_key)
+            website = details["website"]
+            phone_number = details["phoneNumber"]
             if website:
                 scraped_price = scrape_price_from_website(website, anthropic_key)
                 if scraped_price is not None:
@@ -470,6 +482,9 @@ def run_discovery(location_bias: Optional[dict[str, float]] = None) -> dict[str,
             "userRatingsTotal": int(c["user_ratings_total"]) if c.get("user_ratings_total") is not None else 0,
             # 既存データの再取得（バックフィル）でPlace Detailsを直接引けるように保存しておく
             "placeId": place_id,
+            # 予約はアプリ内で完結させず、公式サイト/電話番号への外部リンクとして提供する
+            "website": website,
+            "phoneNumber": phone_number,
         })
         # 次の候補との重複判定にも反映させる
         existing_coords.append((c["lat"], c["lng"]))

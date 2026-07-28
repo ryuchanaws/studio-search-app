@@ -769,6 +769,13 @@ body  {
   opacity: 0.88;
 }
 
+/* 予約ボタン: メインアクセント（紫）の塗りつぶしで他のナビボタンより優先度を上げる */
+.btn-reserve  {
+  background: var(--accent);
+  border-color: var(--accent);
+  flex-basis: 100%;
+}
+
 /* お気に入りボタン: 通常はアウトライン、登録済みは赤 */
 .btn-fav  {
   background: transparent;

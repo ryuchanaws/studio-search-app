@@ -61,19 +61,24 @@ def test_find_nearest_station_distance_m_computes_distance(monkeypatch):
     assert 0 < distance < 500
 
 
-def test_fetch_place_website_returns_none_when_not_ok(monkeypatch):
-    """Place Details APIがOK以外を返した場合はNoneを返す。"""
+def test_fetch_place_details_returns_none_values_when_not_ok(monkeypatch):
+    """Place Details APIがOK以外を返した場合はwebsite/phoneNumberともNoneを返す。"""
     monkeypatch.setattr(discover_studios, "http_get_json", lambda url, params: {"status": "NOT_FOUND"})
-    assert discover_studios.fetch_place_website("fake-place-id", "fake-key") is None
+    result = discover_studios.fetch_place_details("fake-place-id", "fake-key")
+    assert result == {"website": None, "phoneNumber": None}
 
 
-def test_fetch_place_website_returns_url_when_present(monkeypatch):
-    """Place Details APIがwebsiteを返せばそのまま返す。"""
+def test_fetch_place_details_returns_website_and_phone_when_present(monkeypatch):
+    """Place Details APIがwebsite/formatted_phone_numberを返せばそのまま返す。"""
     monkeypatch.setattr(
         discover_studios, "http_get_json",
-        lambda url, params: {"status": "OK", "result": {"website": "https://example.com"}},
+        lambda url, params: {
+            "status": "OK",
+            "result": {"website": "https://example.com", "formatted_phone_number": "03-1234-5678"},
+        },
     )
-    assert discover_studios.fetch_place_website("fake-place-id", "fake-key") == "https://example.com"
+    result = discover_studios.fetch_place_details("fake-place-id", "fake-key")
+    assert result == {"website": "https://example.com", "phoneNumber": "03-1234-5678"}
 
 
 def test_scrape_price_from_website_without_api_key_returns_none():

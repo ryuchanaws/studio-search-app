@@ -8,7 +8,7 @@
 
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { X, Navigation2, Heart, Sparkles, Star, TrendingUp, TrainFront, Users, Banknote, Camera, MessageSquare } from "lucide-react";
+import { X, Navigation2, Heart, Sparkles, Star, TrendingUp, TrainFront, Users, Banknote, Camera, MessageSquare, CalendarCheck, Phone } from "lucide-react";
 import type { Recommendation } from "../types";
 import { getScoreColor, getScoreLabel } from "../utils/score";
 import { getPresignedUploadUrl, uploadImageToS3, updateStudioImage } from "../api/client";
@@ -151,8 +151,27 @@ export const DetailModal = ({ recommendation: rec, isFavorite, onClose, onToggle
           </div>
         </div>
 
-        {/* アクションボタン: ナビ・お気に入り */}
+        {/* アクションボタン: 予約・ナビ・お気に入り */}
         <div className="modal-actions">
+          {/* 予約はアプリ内で完結させず、公式サイト or 電話番号への外部リンクとして提供する
+              （実際の予約処理はスタジオ側のシステムに委ねる） */}
+          {rec.studio?.website ? (
+            <a
+              href={rec.studio.website}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-nav btn-reserve"
+            >
+              <CalendarCheck size={16} />
+              予約する（公式サイト）
+            </a>
+          ) : rec.studio?.phoneNumber ? (
+            <a href={`tel:${rec.studio.phoneNumber}`} className="btn-nav btn-reserve">
+              <Phone size={16} />
+              電話で予約（{rec.studio.phoneNumber}）
+            </a>
+          ) : null}
+
           <button className="btn-nav" onClick={openNav}>
             <Navigation2 size={16} />
             Google Mapsでナビ

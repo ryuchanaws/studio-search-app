@@ -1,8 +1,9 @@
 """
 backfill_studio_details.py
 
-discover_studios.py にスコアリング項目（収容人数・最寄り駅距離・料金）を追加する前に
-発見済みだった既存スタジオへ、これらのフィールドを後追いで埋めるための一回限りのメンテナンススクリプト。
+discover_studios.py にスコアリング項目（収容人数・最寄り駅距離・料金）、および
+予約導線（公式サイト・電話番号）を追加する前に発見済みだった既存スタジオへ、
+これらのフィールドを後追いで埋めるための一回限りのメンテナンススクリプト。
 
 新規発見時は run_discovery() の中で自動的に付与されるが、既存スタジオは
 重複判定（300m以内）で run_discovery() のループに到達しないため、
@@ -76,7 +77,10 @@ def main(dry_run: bool) -> None:
     table = boto3.resource("dynamodb", region_name=AWS_REGION).Table(STUDIOS_TABLE)
     items = table.scan()["Items"]
 
-    targets = [it for it in items if "capacityCategory" not in it or "nearestStationDistanceM" not in it]
+    targets = [
+        it for it in items
+        if "capacityCategory" not in it or "nearestStationDistanceM" not in it or "website" not in it
+    ]
     print(f"Total studios: {len(items)} / needs backfill: {len(targets)}")
 
     for i, studio in enumerate(targets, start=1):
@@ -87,28 +91,37 @@ def main(dry_run: bool) -> None:
         lng = float(studio["lng"])
         print(f"[{i}/{len(targets)}] {name}")
 
-        capacity_category = ds.guess_capacity(name, address, anthropic_key)
-        nearest_station_m = ds.find_nearest_station_distance_m(lat, lng, places_key)
+        capacity_category = studio.get("capacityCategory") or ds.guess_capacity(name, address, anthropic_key)
+        nearest_station_m = studio.get("nearestStationDistanceM")
+        if nearest_station_m is None:
+            nearest_station_m = ds.find_nearest_station_distance_m(lat, lng, places_key)
 
         place_id = studio.get("placeId")
         if not place_id:
             place_id = find_place_id_by_name(name, lat, lng, places_key)
 
+        website = studio.get("website")
+        phone_number = studio.get("phoneNumber")
         cost_yen = int(studio.get("costYen", 0))
-        if cost_yen == 0 and place_id:
-            website = ds.fetch_place_website(place_id, places_key)
-            if website:
+        if place_id and "website" not in studio:
+            details = ds.fetch_place_details(place_id, places_key)
+            website = details["website"]
+            phone_number = details["phoneNumber"]
+            if cost_yen == 0 and website:
                 scraped = ds.scrape_price_from_website(website, anthropic_key)
                 if scraped is not None:
                     cost_yen = scraped
 
-        print(f"    capacity={capacity_category} station={nearest_station_m}m cost={cost_yen} placeId={'yes' if place_id else 'no'}")
+        print(f"    capacity={capacity_category} station={nearest_station_m}m cost={cost_yen} "
+              f"placeId={'yes' if place_id else 'no'} website={'yes' if website else 'no'} phone={'yes' if phone_number else 'no'}")
 
         if not dry_run:
-            update_expr = "SET capacityCategory = :cap, costYen = :cost"
+            update_expr = "SET capacityCategory = :cap, costYen = :cost, website = :web, phoneNumber = :phone"
             expr_values: dict = {
                 ":cap": capacity_category,
                 ":cost": Decimal(str(cost_yen)),
+                ":web": website,
+                ":phone": phone_number,
             }
             if nearest_station_m is not None:
                 update_expr += ", nearestStationDistanceM = :station"
