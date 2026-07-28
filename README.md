@@ -219,8 +219,8 @@ git push origin main
 
 | デプロイ先 | URL | デプロイ方法 |
 |---|---|---|
-| AWS（CloudFront） | （デプロイ後にここへ記載） | `main` ブランチへの push で GitHub Actions が自動デプロイ |
-| Cloudflare Workers | （デプロイ後にここへ記載） | `main` ブランチへの push で GitHub Actions（`deploy-frontend` ジョブ内の `Deploy to Cloudflare Workers` ステップ）が同じビルド成果物を `npx wrangler deploy` する |
+| AWS（CloudFront） | https://d1c03ygthitldo.cloudfront.net/ | `main` ブランチへの push で GitHub Actions が自動デプロイ |
+| Cloudflare Workers | https://studio-search-app.ryuchan-aws.workers.dev/ | `main` ブランチへの push で GitHub Actions（`deploy-frontend` ジョブ内の `Deploy to Cloudflare Workers` ステップ）が同じビルド成果物を `npx wrangler deploy` する |
 
 > Cloudflare側のWorker名は `frontend/wrangler.jsonc` の `name: "studio-search-app"` で指定しており、
 > 釣行AIアプリの Worker（`ryu-chan-fish`）とは別物。GitHub Secrets もリポジトリごとに別登録のため、
