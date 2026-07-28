@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>レンタルスタジオサーチアプリ 企画・設計アーカイブ</title>
+<style>
+body { font-family: Arial, sans-serif; line-height:1.6; padding:24px; max-width: 960px; margin: 0 auto; }
+h1 { color:#7c3aed; }
+h2 { border-left:6px solid #7c3aed; padding-left:10px; margin-top:32px; }
+h3 { color:#9333ea; }
+.box { background:#f7f5fc; padding:12px; border-radius:6px; margin:10px 0; }
+pre { background:#eee; padding:10px; overflow-x:auto; }
+table { border-collapse: collapse; width: 100%; margin-top:10px; margin-bottom:14px; }
+td, th { border:1px solid #ccc; padding:8px; font-size:14px; }
+th { background:#f3e8ff; }
+.archive-note { background:#fff3cd; border-left:5px solid #e0a030; padding:10px 14px; margin:8px 0; font-size:14px; }
+</style>
+</head>
+
+<body>
+
+<h1>レンタルスタジオサーチアプリ 企画・設計アーカイブ</h1>
+
+<div class="archive-note">
+<b>これはアーカイブ資料です。</b> 本アプリは、同じ開発者が先に運用していた「釣行AIアプリ」
+（fishing-ai-app）のアーキテクチャ・思想をほぼそのまま流用して、対象ドメインを
+「釣り場」から「ダンス・ヨガのレンタルスタジオ」に置き換える形で立ち上げられた。
+そのため通常の企画書・要件定義書のようなゼロからの起点は無く、<b>「何を釣行AIアプリから
+引き継ぎ、何を変えたか」という変換の記録</b>そのものが企画の実体になっている。
+本書はその変換方針と、その後のスコアリング刷新の経緯を記録として残す目的で保管しており、
+<b>現在の正確な仕様ではない</b>箇所（当初のスコア式・当初のデータ設計等）を含む。<br><br>
+<b>現状の正しい情報は以下を参照:</b><br>
+・機能の全体像・使い方 → <code>アプリまるわかりガイド.html</code><br>
+・Lambda関数単位の仕様 → <code>詳細設計.html</code><br>
+・ファイル構成・依存関係 → <code>ファイル構成・依存関係.html</code><br>
+・AWSサービス構成 → <code>AWS構成・サービス連携.html</code><br>
+・デプロイ手順 → <code>README.md</code>
+</div>
+
+<hr>
+
+<h2>1. 背景・課題</h2>
+
+<div class="box">
+釣行AIアプリのAnthropic API・AWSアカウントを別アプリでも使い回せるかという相談から、
+「このアプリの基盤をほぼそのまま参考にしたレンタルスタジオサーチアプリを作りたい」という
+要望に発展した。ダンス・ヨガスタジオという対象を選んだのは、釣行AIアプリと同じ
+「実在する場所をGoogle Places APIで発見し、AIが説明・推薦理由を生成する」という
+パターンがそのまま当てはまるドメインだったため。
+</div>
+
+<h3>想定ユーザー</h3>
+<ul>
+<li>ダンス・ヨガの個人練習者、初心者〜中級者</li>
+<li>スタジオ選びに時間をかけたくない層</li>
+</ul>
+
+<h2>2. スコープ決定: 小さいMVPか、最初から full parity か</h2>
+
+<div class="box">
+計画段階で「釣行AIアプリと同等の機能を最初から実装する」か「小さいMVPから始めて
+段階的に拡張する」かを検討した。釣行AIアプリ自体は段階的に機能を積み上げてきた経緯が
+あることを説明した上で選択を仰いだところ、<b>「釣行AIアプリと同等の機能を最初から」</b>
+という方針が明確に選ばれた。理由は、釣行AIアプリという既に検証済みのアーキテクチャ・
+コードベースを流用する以上、ゼロから機能を段階検証する必要性が薄いため。
+この結果、認証（Cognito+Google）・AI相談・投稿編集・コスト保護レート制限・
+reason使い回しキャッシュといった「あると良い」機能も含め、v1から全て実装する
+方針で進めることになった。
+</div>
+
+<h2>3. ドメイン変換の対応表（初期案）</h2>
+
+<table>
+<tr><th>釣行AIアプリ</th><th>今回のアプリ</th></tr>
+<tr><td>Spots（釣り場）</td><td>Studios（ダンス・ヨガスタジオ）</td></tr>
+<tr><td>fishTypes（釣れる魚種）</td><td>facilityTags（設備タグ: 鏡張り・フローリング・音響設備等）</td></tr>
+<tr><td>天気・潮汐スコア</td><td>口コミ評価（rating）・レビュー数（user_ratings_total）</td></tr>
+<tr><td>discover_spots.py</td><td>discover_studios.py（同じくPlaces Text Search、クエリを"ダンススタジオ レンタル"等に変更）</td></tr>
+<tr><td>釣果投稿（Posts）</td><td>レビュー投稿（Posts、写真+コメント+★評価）</td></tr>
+<tr><td>AI相談（釣り・エサ）</td><td>AI相談（スタジオ選び・練習用途の相談）</td></tr>
+<tr><td>釣具店検索（除外＋別枠）</td><td>v1では対象外（明確な代替ドメインが無いため）</td></tr>
+</table>
+
+<h2>4. スコアロジックの変遷</h2>
+
+<h3>当初案（釣行AIアプリの式をそのまま移植）</h3>
+<pre>
+score = rating_score * 0.4       # Placesのrating(0-5)を0-100に正規化
+      + popularity_score * 0.2   # user_ratings_totalを正規化
+      + appeal_score * 0.2       # estimate_studio_appeal()のヒューリスティック
+      - dist_norm * 0.1          # 基準地点（東京駅）からの距離
+      - cost_norm * 0.1          # 常に0（Places APIが料金を返さないため）
+</pre>
+
+<div class="archive-note">
+この式は「距離」と「費用」が釣行AIアプリの構造をそのまま踏襲しており、
+特に距離は「基準地点（東京駅）からの直線距離」という、全国のスタジオを対象にする
+本アプリにとってはあまり意味の無い指標だった。費用も常に0固定で、実質機能していなかった。
+</div>
+
+<h3>刷新後（現行）</h3>
+<div class="box">
+「釣りと違ってスタジオは天気に左右されず、一度付けたスコアがあまり変わらない」という
+指摘をきっかけに、スコア項目を見直した。
+</div>
+<table>
+<tr><th>項目</th><th>変更内容</th><th>理由</th></tr>
+<tr><td>距離</td><td>基準地点からの距離 → 最寄り駅からのアクセス（Places Nearby Search）</td><td>ユーザーの現在地に依存しない、スタジオ自体の固有の通いやすさを表す指標にするため</td></tr>
+<tr><td>収容人数</td><td>新規追加（capacityCategory）</td><td>Claudeによる店名・住所からのヒューリスティック推測（設備タグ推測と同方式）。将来のエリア+人数選択機能の土台</td></tr>
+<tr><td>料金</td><td>常に0 → 公式サイトを取得しClaudeが実際に書かれた金額を抽出</td><td>Places APIが料金を返さないため。サイトに無ければ「不明」とし、AIが金額を作り出すことはしない設計</td></tr>
+</table>
+
+<div class="archive-note">
+既存スタジオ（スコアリング刷新前に発見済みだった分）は<code>backend/scripts/backfill_studio_details.py</code>で
+後追いバックフィルした。最新の式・実装は<code>詳細設計.html</code>を参照。
+</div>
+
+<h2>5. AWSアーキテクチャの決定</h2>
+
+<div class="box">
+「同じAWSアカウントを使うか、別アカウントか」を検討し、<b>釣行AIアプリと同じAWSアカウント
+（630956767121）に、完全に独立したCloudFormationスタック（studio-search-app）として構築する</b>
+方針を選択した。理由は、口座・請求を分ける必要性が薄く、同一アカウント内でも
+スタック単位で完全に隔離できるため。ただしCognito User Pool・SSMパラメータパス・
+Cloudflare Worker名は、両アプリの運用が互いに影響しないよう明確に分離した。
+</div>
+
+<h2>6. 実装中に発覚した不具合とその対応</h2>
+
+<h3>Lambda関数名の衝突</h3>
+<div class="archive-note">
+初回デプロイ時、多くのLambda関数に釣行AIアプリと同じ<code>FunctionName</code>
+（<code>getRecommendationsHandler</code>等）を固定指定していたため、Lambda関数名の
+アカウント+リージョン一意制約に反して既存関数と衝突し、
+<code>AWS::EarlyValidation::ResourceExistenceCheck</code>でデプロイが失敗した。
+全Lambdaの<code>FunctionName</code>指定を削除し、CloudFormationに自動採番させる形に
+修正して解消した。
+</div>
+
+<h3>フロントエンドの地図が表示されない</h3>
+<div class="archive-note">
+デプロイ後、地図ページが表示されない不具合が発生。当初はGoogle Cloud Console側の
+APIキー制限（HTTPリファラー）が原因と推測したが、実際にブラウザが送信していた
+リクエストを調査したところ、GitHub Secretsの<code>VITE_GOOGLE_MAPS_KEY</code>に
+<code>VITE_GOOGLE_MAPS_KEY=</code>という変数名ごと値が登録されていたことが真因だった
+（.envファイルの行をそのままコピペしたことによる人為的ミス）。値をキー本体のみに
+修正して解消した。</div>
+
+<h2>7. フロントエンド配信の追加: Cloudflare Workers</h2>
+<div class="box">
+当初はAWS（CloudFront）単独で構築したが、釣行AIアプリと同様に「独自ドメイン取得前の
+見た目の良い無料URL」としてCloudflare Workersへの並行デプロイを追加した。
+Worker名を<code>studio-search-app</code>（釣行AIアプリは<code>ryu-chan-fish</code>）と
+明確に別名にし、GitHub Secretsもリポジトリごとに別登録することで、互いのWorkerを
+誤って上書きするリスクを排除している。
+</div>
+
+<h2>8. 将来拡張アイデア（未着手）</h2>
+<ul>
+<li>エリア・人数を選択してからAI分析を実行するモード（「現在地から探す」は即時系として現状のまま維持）。
+収容人数目安（capacityCategory）は既に実装済みで、この機能の土台として先に追加した</li>
+<li>AI分析または現在地から見つけたスタジオを実際に予約できる機能</li>
+<li>アプリ内レビューの★評価を、独自の信頼シグナルとしてスコアへ組み込む（Google側の評価とは別軸）</li>
+<li>営業時間の柔軟さ（Places APIのopening_hours）をスコアに反映</li>
+</ul>
+
+<h2>9. まとめ</h2>
+
+<div class="box">
+本プロダクトは「釣行AIアプリのアーキテクチャを、別ドメインに移植する」という形で
+立ち上がった。企画段階から「実在データ（Google Places API）とAIによる説明生成を分離し、
+AIには存在しないスタジオ・存在しない料金を作らせない」という設計思想を引き継いでおり、
+スコアリング刷新（駅距離・収容人数・料金抽出）でもこの原則は一貫して守られている。
+</div>
+
+</body>
+</html>

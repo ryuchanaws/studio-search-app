@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>AWS構成・サービス連携ガイド（スタジオサーチ）</title>
+<style>
+body { font-family: Arial, sans-serif; line-height:1.6; padding:24px; max-width: 980px; margin: 0 auto; }
+h1 { color:#7c3aed; }
+h2 { border-left:6px solid #7c3aed; padding-left:10px; margin-top:32px; }
+h3 { color:#9333ea; margin-top:22px; }
+.box { background:#f7f5fc; padding:12px; border-radius:6px; margin:10px 0; }
+pre { background:#eee; padding:12px; overflow-x:auto; font-size:13px; line-height:1.5; }
+table { border-collapse: collapse; width: 100%; margin-top:10px; margin-bottom:16px; }
+td, th { border:1px solid #ccc; padding:8px; font-size:14px; vertical-align:top; }
+th { background:#f3e8ff; }
+.why { background:#fff8ec; border-left:4px solid #e0a030; padding:8px 12px; margin:8px 0; font-size:14px; }
+.why b { color:#a05a00; }
+</style>
+</head>
+
+<body>
+
+<h1>AWS構成・サービス連携ガイド（レンタルスタジオサーチアプリ）</h1>
+
+<div class="box">
+このアプリで実際に使っているAWS（およびAWS外の関連）サービスを一覧化し、
+「何のために」「なぜそれを選んだか」「他のどのサービスと連携しているか」を
+サービス単位でまとめたもの。Lambda関数単位の詳細は<b>詳細設計.html</b>、
+ファイル単位の対応は<b>ファイル構成・依存関係.html</b>を参照。
+本資料は釣行AIアプリ（fishing-ai-app）と同じAWSアカウント上に、完全に独立した
+CloudFormationスタック（<code>studio-search-app</code>）として構築した時点の構成を反映している。
+</div>
+
+<hr>
+
+<h2>1. 全体構成図</h2>
+
+<pre>
+【フロントエンド配信】
+ユーザー（ブラウザ / PWA）
+   │
+   ├─→ CloudFront ─→ S3（フロントエンド静的ファイル、OAC経由の非公開バケット）  ← 本番の正系
+   └─→ Cloudflare Workers（studio-search-app.*.workers.dev の無料ミラー）        ← 独自ドメイン取得前の代替配信
+
+【API本体（AWSのみ）】
+ユーザー（ブラウザ）
+   │  ログイン
+   ▼
+Cognito User Pool（studio-search-app-users）──外部IdP連携──▶ Google（Googleアカウントでログイン）
+   │  IDトークン（JWT）
+   ▼
+API Gateway（REST API）── CognitoAuthorizerでJWTを検証 ──┐
+   │                                                      │
+   ▼                                                      │
+Lambda（API系 17関数 / バッチ系 4関数）                    │
+   │           │            │              │              │
+   ▼           ▼            ▼              ▼              ▼
+DynamoDB    S3(Uploads)  SSM Parameter  外部API      （Cognitoへは戻らない）
+(7テーブル)  写真保存      Store（APIキー） Google Places/
+                                          Claude/公式サイト
+
+【定期実行】
+EventBridge（毎日AM6:00 JST）──▶ generateStudioScoreBatch（Lambda）
+
+【コスト監視】
+AWS Budgets ──▶ メール通知（月$10の80%/100%到達時）
+</pre>
+
+<h2>2. サービス一覧（早見表）</h2>
+
+<table>
+<tr><th>サービス</th><th>役割</th><th>主な連携先</th></tr>
+<tr><td>Amazon Cognito</td><td>Googleアカウントでのログイン認証（釣行AIアプリとは別のUser Pool）</td><td>Google（外部IdP）、API Gateway（JWT検証）</td></tr>
+<tr><td>Amazon API Gateway</td><td>フロントからのHTTPリクエストの受付・認証・Lambdaへのルーティング</td><td>Cognito、Lambda（21関数）</td></tr>
+<tr><td>AWS Lambda</td><td>実際の処理を行うプログラム本体（API系・バッチ系の2パッケージ）</td><td>DynamoDB、S3、SSM、外部API、他のLambda（非同期起動）</td></tr>
+<tr><td>Amazon DynamoDB</td><td>アプリの全データ（スタジオ・おすすめ・投稿・チャット等）の保存先</td><td>Lambda</td></tr>
+<tr><td>Amazon S3</td><td>①フロントエンドの静的ファイル配信 ②ユーザーがアップロードする写真の保存</td><td>CloudFront（OAC経由、①）、Lambda・ブラウザ直PUT（②）</td></tr>
+<tr><td>Amazon CloudFront</td><td>フロントエンドをCDN経由で高速配信（本番の正系）</td><td>S3（Origin Access Control経由のオリジン）</td></tr>
+<tr><td>Cloudflare Workers（AWS外）</td><td>フロントエンドの無料ミラー配信（独自ドメイン未取得のため）</td><td>フロントのビルド成果物を直接デプロイ（AWSとは独立、Worker名<code>studio-search-app</code>）</td></tr>
+<tr><td>AWS Systems Manager Parameter Store（SSM）</td><td>外部APIキー（Claude・Google Places・Google OAuth）の安全な保管</td><td>Lambda（実行時に取得）。パスは<code>/studio-search/*</code>で釣行AIアプリ（<code>/fishing-ai/*</code>）とは分離</td></tr>
+<tr><td>Amazon EventBridge</td><td>毎日決まった時刻にバッチLambdaを自動起動するスケジューラ</td><td>generateStudioScoreBatch（Lambda）</td></tr>
+<tr><td>AWS Budgets</td><td>AWS利用料が閾値を超えたらメール通知</td><td>Eメール（rfunao0955@gmail.com）</td></tr>
+<tr><td>AWS IAM</td><td>各Lambdaに必要最小限の権限だけを付与</td><td>全AWSサービスへのアクセス制御</td></tr>
+<tr><td>GitHub Actions（AWS外）</td><td>mainブランチへのpushをトリガーに自動デプロイ</td><td>AWS（SAM CLI経由）、Cloudflare、S3、CloudFront</td></tr>
+</table>
+
+<h2>3. 各サービスの詳細</h2>
+
+<h3>■ Amazon Cognito（User Pool + Google連携）</h3>
+<div class="box">
+ログイン機能そのもの。「Googleアカウントでログイン」ボタンを押すとCognitoのHosted UIに飛び、
+Cognitoが裏でGoogleと認可コードのやり取りをして、最終的にアプリ向けのIDトークン（JWT）を発行する。
+このJWTがAPI Gatewayでの認証に使われる。Hosted UIドメインは
+<code>studio-search-app-&lt;AWSアカウントID&gt;.auth.ap-northeast-1.amazoncognito.com</code>。
+</div>
+<div class="why"><b>なぜ釣行AIアプリと別のUser Poolか:</b> Client ID・Hosted UIドメインは
+User Pool単位でしか発行できず、共有するとログイン画面のURLやリダイレクト設定が
+アプリ間で衝突する。Google Cloud Console側のOAuthクライアントも専用のものを別途発行している。</div>
+
+<h3>■ Amazon API Gateway（REST API）</h3>
+<div class="box">
+フロントエンドが呼び出す全エンドポイント（<code>/recommendations</code>、<code>/chat</code>、
+<code>/posts</code>等）の窓口。ログイン必須のエンドポイントには<code>CognitoAuthorizer</code>を
+アタッチしており、JWTが無効・未提示なら該当Lambdaを呼ばずに401を返す。
+</div>
+<div class="why"><b>なぜAPI Gateway:</b> Lambdaを直接インターネットに公開せず、認証・CORS・
+ルーティングを一括管理できる。統合タイムアウトが29秒固定という制約があり、これが
+AIチャット（同期呼び出し、Lambda側25秒に短縮）とAI分析（非同期呼び出しに変更）の
+設計判断に直接影響している（詳細設計.html参照）。</div>
+
+<h3>■ AWS Lambda（API系・バッチ系の2パッケージ）</h3>
+<div class="box">
+実処理の本体。<code>backend/lambda/api/</code>（17関数、handlers.py）と
+<code>backend/lambda/batch/</code>（4関数、generate_studio_score.py等）の2つのSAM
+CodeUriパッケージに分かれており、この2つの間でコードは共有できない
+（<code>batch_common.py</code>のようなヘルパーが両パッケージに重複して存在する理由）。
+</div>
+<div class="why"><b>なぜLambda（サーバーレス）:</b> 個人利用規模のトラフィックでは
+「常時起動のサーバー」は過剰投資になる。呼ばれた時だけ課金される従量課金と、
+インフラ管理不要な点を重視した。</div>
+<div class="why"><b>Lambda関数名を固定しなかった理由:</b> 当初<code>FunctionName</code>を
+釣行AIアプリと同じ命名（<code>getRecommendationsHandler</code>等）で固定していたところ、
+Lambda関数名はリージョン内でアカウント共通の一意制約があるため、既に稼働している
+釣行AIアプリの同名関数と衝突し、初回デプロイが<code>AWS::EarlyValidation::ResourceExistenceCheck</code>
+エラーで失敗した。全Lambdaの<code>FunctionName</code>指定を削除し、CloudFormationに
+自動採番させる形に修正することで解消した。</div>
+
+<h3>■ Amazon DynamoDB（7テーブル）</h3>
+<table>
+<tr><th>テーブル名</th><th>役割</th></tr>
+<tr><td>studio-studios</td><td>スタジオマスタ（座標・名前・設備・収容人数・最寄り駅距離・料金・写真URL等）</td></tr>
+<tr><td>studio-recommendations</td><td>スタジオごとの最新スコア・AIコメント（1スタジオ1件、上書き型）</td></tr>
+<tr><td>studio-favorites</td><td>お気に入り登録</td></tr>
+<tr><td>studio-posts</td><td>レビュー投稿（本文・写真・★評価）</td></tr>
+<tr><td>studio-chats</td><td>AI相談チャットの会話履歴</td></tr>
+<tr><td>studio-usage</td><td>1日あたりのAI/API呼び出し回数（レート制限用、TTLで自動削除）</td></tr>
+<tr><td>studio-users</td><td>ユーザーの表示名（ユーザー名）</td></tr>
+</table>
+<div class="why"><b>なぜDynamoDB:</b> スキーマがシンプルでアクセスパターンも
+単純（PK検索・全件scan中心）なため、RDBのような複雑なクエリは不要。
+PAY_PER_REQUESTモードで使った分だけ課金され、サーバーレスLambdaとの相性も良い。</div>
+
+<h3>■ Amazon S3（2バケット）</h3>
+<div class="box">
+①フロントエンド配信用バケット（<code>studio-search-app-frontend-&lt;アカウントID&gt;</code>）：
+Reactのビルド成果物（HTML/JS/CSS）を置き、CloudFrontがOrigin Access Control（OAC）経由で
+参照する非公開バケット。②<code>UploadsBucket</code>（<code>studio-search-app-uploads-&lt;アカウントID&gt;</code>）：
+ユーザーが投稿・スタジオに設定する写真の保存先。フロントはLambda
+（<code>presignUploadHandler</code>）から発行される署名付きPOSTフォームを使って
+ブラウザから直接S3へアップロードし、Lambda自体は画像バイナリを経由しない
+（API Gatewayのペイロードサイズ制限回避のため）。
+</div>
+<div class="why"><b>なぜOACで非公開バケットか:</b> S3の静的website機能（公開バケット）ではなく、
+CloudFrontのOrigin Access Control経由でのみ読み取りを許可するバケットポリシーにしている。
+バケット自体への直接アクセスを防ぎつつ、CloudFront経由のアクセスだけを許可できる、
+より安全な構成のため（釣行AIアプリの既存構成を踏襲）。</div>
+<div class="why"><b>なぜ署名付きアップロード:</b> 画像バイナリをLambda経由にすると
+API Gatewayのペイロード上限に引っかかる。S3への直接アップロードにすることで
+この制約を回避しつつ、<code>content-length-range</code>条件でアップロード上限
+（8MB）をS3側に強制させている。</div>
+
+<h3>■ Amazon CloudFront ＋ Cloudflare Workers（フロント配信が2系統ある理由）</h3>
+<div class="box">
+本番の正系はCloudFront（S3をオリジンとするCDN、OAC経由）。<code>index.html</code>は
+<code>no-cache</code>、ハッシュ付きアセット（<code>/assets/index-&lt;hash&gt;.js</code>）は
+長期キャッシュという構成。加えて、独自ドメインを取得する前の段階で見た目の良い
+URLを用意するため、Cloudflare Workers（<code>studio-search-app.*.workers.dev</code>）に
+も同じビルド成果物を並行デプロイしている。バックエンドAPI（API Gateway）はAWS側
+1本のみで共有しており、フロントの配信経路だけが2系統ある形。
+</div>
+<div class="why"><b>釣行AIアプリのWorkerと衝突しない理由:</b> <code>wrangler.jsonc</code>の
+<code>name</code>を<code>studio-search-app</code>（釣行AIアプリは<code>ryu-chan-fish</code>）と
+明示的に別名にしており、GitHub Secrets（<code>CLOUDFLARE_API_TOKEN</code>等）もリポジトリごとに
+別登録のため、どちらかのアプリのデプロイがもう片方のWorkerを誤って上書きすることは無い。</div>
+
+<h3>■ AWS Systems Manager Parameter Store（SSM）</h3>
+<div class="box">
+Claude APIキー（<code>/studio-search/anthropic-api-key</code>）、Google Places APIキー
+（<code>/studio-search/google-places-api-key</code>）、Google OAuthクライアントID/シークレット
+（<code>/studio-search/google-oauth-client-id</code>・<code>-secret</code>）をSSMに保管。
+Lambdaの環境変数に直書きせず、実行時に<code>ssm:GetParameter</code>で取得する。
+</div>
+<div class="why"><b>なぜ釣行AIアプリと別パスか:</b> AnthropicのAPIキー自体（クレジット残高）は
+釣行AIアプリと共有してよい前提だが、Lambdaごとの権限スコープ（IAMポリシーが参照する
+パラメータ名）を綺麗に保つため、登録パス自体は<code>/fishing-ai/*</code>とは分離している。
+実際、両アプリのAnthropicキー・Google Placesキーは同じ値を使い回して登録した。</div>
+
+<h3>■ Amazon EventBridge</h3>
+<div class="box">
+<code>cron(0 21 * * ? *)</code>（UTC 21:00 = 日本時間AM6:00）で
+<code>generateStudioScoreBatch</code>を毎日自動起動し、全スタジオのスコアを
+最新化する。ユーザーが「AI分析を実行」ボタンを押さなくても、朝には最新の
+おすすめが用意されている状態を作るための仕組み。
+</div>
+
+<h3>■ AWS Budgets</h3>
+<div class="box">
+月$10のAWS利用料予算を設定し、80%/100%到達時にメールで通知する
+（<code>template.yaml</code>の<code>CostBudget</code>リソース、予算名
+<code>studio-search-app-monthly</code>）。ただしこれはAWS側の課金のみを見ており、
+Google Cloud（Places/Maps）やAnthropic（Claude）の課金はAWSの外で発生するため対象外。
+それぞれGoogle Cloud ConsoleとAnthropic Console側で別途予算アラート・spend limitの
+設定が必要（README.md「10. 利用料アラート」参照）。
+</div>
+
+<h3>■ AWS IAM（最小権限方針）</h3>
+<div class="box">
+各Lambda関数には、その関数が実際に必要とするDynamoDBテーブル・S3バケット・
+SSMパラメータへのアクセス権限だけをSAMの<code>Policies</code>（
+<code>DynamoDBCrudPolicy</code>・<code>S3WritePolicy</code>・
+<code>SSMParameterReadPolicy</code>等）で個別に付与している。
+例えば<code>GetStudiosFunction</code>はStudiosテーブルの読み取りしかできず、
+書き込みや他テーブルへのアクセス権限は持たない。
+</div>
+
+<h2>4. 主要フローのサービス連携トレース</h2>
+
+<h3>① ログイン</h3>
+<pre>
+ブラウザ「ログイン」クリック
+ → Cognito Hosted UI（studio-search-app-&lt;アカウントID&gt;.auth.ap-northeast-1.amazoncognito.com）
+ → Google認証画面（Cognitoが仲介）
+ → Cognitoに戻りIDトークン（JWT）発行
+ → フロントがJWTを保持し、以後のAPIリクエストにAuthorizationヘッダーとして付与
+</pre>
+
+<h3>② 「AI分析を実行」ボタン</h3>
+<pre>
+フロント → API Gateway → adminRunAiBatch（Lambda、UsageTableでレート制限チェック）
+ → generateStudioScoreBatch を非同期起動して即202を返す
+ → generateStudioScoreBatch が裏側で実行:
+    StudiosTable全件取得
+     → discover_studios.run_discovery()で新規スタジオ探索（Google Places API、SSMからキー取得）
+        新規候補ごとに: 設備推測・収容人数推測（Claude）、最寄り駅検索（Places Nearby Search）、
+        公式サイト取得＋料金抽出（Place Details→サイト取得→Claude）
+     → スコア計算（ルールベース、最寄り駅距離を使用）
+     → スコアが大きく動いたスタジオのみClaude APIで理由文生成（SSMからキー取得）
+     → RecommendationsTableへ保存
+ → フロントは GET /recommendations を数秒おきにポーリングして完了を検知
+</pre>
+
+<h3>③ AI相談チャット（画像添付あり）</h3>
+<pre>
+フロント → API Gateway（CognitoAuthorizerでJWT検証）→ postChatHandler
+ → UsageTableでレート制限チェック（1日30件）
+ → S3(Uploads)から画像バイトを取得
+ → StudiosTable・RecommendationsTableをscanして実データのコンテキストを構築
+ → Claude APIへテキスト＋画像＋実データコンテキストを送信（SSMからキー取得）
+ → 応答をChatsTableに保存し、同期的にフロントへ返却
+</pre>
+
+<h3>④ 写真アップロード（レビュー投稿・スタジオ写真）</h3>
+<pre>
+フロント → presignUploadHandler（Lambda）が署名付きPOSTフォームを発行
+ → ブラウザがS3(Uploads)へ直接POST（Lambda/API Gatewayを経由しない）
+ → アップロード完了後、公開URLをPosts/StudiosテーブルにLambda経由で保存
+</pre>
+
+<h2>5. なぜこの構成にしたか（設計方針まとめ）</h2>
+<ul>
+<li><b>サーバーレス徹底:</b> 個人利用規模のトラフィックに対して常時稼働のサーバーは過剰。
+使った分だけ課金されるLambda・DynamoDB・S3（+CloudFront）で構成し、待機コストをゼロに近づけている</li>
+<li><b>バッチ中心・リアルタイム処理の排除:</b> スコア計算はEventBridgeの日次バッチと手動実行の
+2経路に絞り、常時ポーリングするような設計を避けている</li>
+<li><b>実データとAI生成の分離:</b> 座標・実在性・料金など「間違えられないデータ」は
+Google Places APIや公式サイトの実テキストのみを情報源とし、AI（Claude）は説明文生成や
+設備・収容人数の推測など「間違っても実害が小さい付随情報」にのみ使う
+（ハルシネーション対策。料金抽出も「サイトに書いてあれば数字を返す、無ければ不明」であり
+AIが金額を作り出すことはない）</li>
+<li><b>最小権限のIAM:</b> Lambdaごとに必要なリソースへのアクセス権限だけを絞って付与</li>
+<li><b>コスト保護の多層化:</b> ①ユーザー単位の1日あたりレート制限（UsageTable）、
+②AWS Budgets（AWS利用料）、③Google Cloud・Anthropic Console側の予算アラート（AWS外の課金）、
+という3層でコスト暴走を防ぐ設計にしている</li>
+<li><b>既存アプリとの独立性:</b> 釣行AIアプリと同じAWSアカウント・同じAnthropic/Cloudflare
+アカウントを使い回しつつも、CloudFormationスタック・Cognito User Pool・SSMパラメータパス・
+Cloudflare Worker名・GitHub Secretsは全て別物にし、互いの運用に影響が出ないようにしている</li>
+</ul>
+
+</body>
+</html>

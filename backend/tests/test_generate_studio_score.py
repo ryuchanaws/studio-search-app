@@ -1,8 +1,16 @@
-"""generate_studio_score.py の純粋関数（calc_score・normalize_*・_should_regenerate_reason）のテスト。"""
+"""generate_studio_score.py の純粋関数（calc_score・normalize_*・_should_regenerate_reason）、
+および handler() のエンドツーエンドテスト（moto で DynamoDB をモック）。
+"""
 
+import importlib
+import os
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
+import boto3
 import generate_studio_score
+import pytest
+from moto import mock_aws
 
 
 def test_calc_score_perfect_conditions_no_distance_no_cost():
@@ -130,3 +138,62 @@ def test_generate_reason_without_api_key_returns_fallback_text(monkeypatch):
     )
     assert "テストスタジオ" in reason
     assert "鏡張り" in reason
+
+
+@pytest.fixture
+def tables_for_handler():
+    """moto上にStudiosTable・RecommendationsTableを作成し、
+    batch_common/discover_studios/generate_studio_scoreをモック配下で再読み込みして返す
+    （test_discover_studios.pyのstudios_table_for_discoveryと同じ理由でreloadが必要）。
+    """
+    with mock_aws():
+        client = boto3.client("dynamodb", region_name=os.environ["AWS_REGION"])
+        client.create_table(
+            TableName=os.environ["STUDIOS_TABLE"],
+            AttributeDefinitions=[{"AttributeName": "studioId", "AttributeType": "S"}],
+            KeySchema=[{"AttributeName": "studioId", "KeyType": "HASH"}],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        client.create_table(
+            TableName=os.environ["RECOMMENDATIONS_TABLE"],
+            AttributeDefinitions=[{"AttributeName": "studioId", "AttributeType": "S"}],
+            KeySchema=[{"AttributeName": "studioId", "KeyType": "HASH"}],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        import batch_common
+        import discover_studios
+        import generate_studio_score as gss
+
+        importlib.reload(batch_common)
+        importlib.reload(discover_studios)
+        importlib.reload(gss)
+        yield gss
+
+
+def test_handler_scores_studio_missing_new_fields(monkeypatch, tables_for_handler):
+    """capacityCategory/nearestStationDistanceMが未設定の（バックフィル前の）スタジオでも、
+    handler()がNameError等で丸ごとクラッシュせずスコアを計算しRecommendationsへ保存できること
+    （DEFAULT_CAPACITY_CATEGORY未import等の回帰を検知するためのエンドツーエンドテスト）。
+    """
+    gss = tables_for_handler
+    monkeypatch.setattr(gss, "run_discovery", lambda *a, **k: {"status": "skipped"})
+    monkeypatch.setattr(gss, "generate_reason", lambda *a, **k: "テスト理由文")
+
+    studios_table = gss._get_table(os.environ["STUDIOS_TABLE"])
+    studios_table.put_item(Item={
+        "studioId": "studio-legacy",
+        "name": "旧データスタジオ",
+        "lat": Decimal("35.6"), "lng": Decimal("139.7"),
+        "facilityTags": ["鏡張り"],
+        "rating": Decimal("4.5"), "userRatingsTotal": 10,
+        # capacityCategory・nearestStationDistanceM・costYen は未設定（バックフィル前を模擬）
+    })
+
+    result = gss.handler({}, None)
+    assert result["statusCode"] == 200
+
+    rec_table = gss._get_table(os.environ["RECOMMENDATIONS_TABLE"])
+    items = rec_table.scan()["Items"]
+    assert len(items) == 1
+    assert items[0]["studioId"] == "studio-legacy"
+    assert items[0]["capacityCategory"] == gss.DEFAULT_CAPACITY_CATEGORY

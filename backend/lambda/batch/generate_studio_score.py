@@ -38,7 +38,7 @@ from typing import Any
 import anthropic
 
 from batch_common import get_table as _get_table, get_ssm_parameter
-from discover_studios import run_discovery
+from discover_studios import run_discovery, DEFAULT_CAPACITY_CATEGORY
 
 # 環境変数からテーブル名・SSMパラメータ名を取得
 STUDIOS_TABLE         = os.environ.get("STUDIOS_TABLE", "studio-studios")

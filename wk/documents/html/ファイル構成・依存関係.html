@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>ファイル構成・依存関係マップ（スタジオサーチ）</title>
+<style>
+body { font-family: Arial, sans-serif; line-height:1.6; padding:24px; }
+h1 { color:#7c3aed; }
+h2 { border-left:6px solid #7c3aed; padding-left:10px; margin-top:28px; }
+h3 { color:#9333ea; }
+.box { background:#f7f5fc; padding:12px; border-radius:6px; margin:10px 0; }
+pre { background:#eee; padding:10px; overflow-x:auto; }
+table { border-collapse: collapse; width: 100%; margin-top:10px; }
+td, th { border:1px solid #ccc; padding:8px; }
+th { background:#f3e8ff; }
+code { background:#eee; padding:1px 4px; border-radius:3px; }
+</style>
+</head>
+
+<body>
+
+<h1>ファイル構成・依存関係マップ（レンタルスタジオサーチアプリ）</h1>
+
+<div class="box">
+本書は「どの画面が何をするか」「どのファイルがどのファイルを読んでいるか」を一覧できるようにするための
+リファレンス。釣行AIアプリ（fishing-ai-app）の同名資料をベースに、ドメイン変換
+（Spots→Studios等）と、スコアリング刷新（口コミ・設備・最寄り駅距離・収容人数・料金）を
+反映した最新版。仕様の背景・意思決定理由は AWS構成・サービス連携.html／詳細設計.html／
+企画・設計アーカイブ.html を参照。
+</div>
+
+<hr>
+
+<h2>1. 画面一覧（フロントエンド）</h2>
+
+<table>
+<tr><th>URL</th><th>画面名</th><th>ページファイル</th><th>やること</th></tr>
+<tr><td><code>/</code></td><td>おすすめ</td><td><code>pages/TopPage.tsx</code></td><td>AIスコア順のTOP3・一覧表示、AI分析実行、現在地から新スタジオ探索、現在地基準の再ランキング</td></tr>
+<tr><td><code>/map</code></td><td>地図</td><td><code>pages/MapPage.tsx</code></td><td>Google Maps上に全スタジオをスコア色分けピン表示</td></tr>
+<tr><td><code>/studios</code></td><td>スタジオ</td><td><code>pages/StudiosPage.tsx</code></td><td>全スタジオ一覧（スコア・設備・ナビリンク）、キーワード・設備タグでの絞り込み</td></tr>
+<tr><td><code>/favorites</code></td><td>保存済み</td><td><code>pages/FavoritesPage.tsx</code></td><td>お気に入り登録済みスタジオのみ表示</td></tr>
+<tr><td><code>/posts</code></td><td>レビュー</td><td><code>pages/PostsPage.tsx</code></td><td>レビュー投稿（★評価・本文・写真）の一覧・作成・編集・削除。編集は本人の投稿のみ、投稿先スタジオは変更不可</td></tr>
+<tr><td><code>/chat</code></td><td>AI相談</td><td><code>pages/ChatPage.tsx</code></td><td>写真添付対応のAIチャット、会話履歴、送信済みメッセージの編集。実データ（Studios/Recommendations）に基づいた回答</td></tr>
+<tr><td><code>/guide</code></td><td>使い方</td><td><code>pages/GuidePage.tsx</code></td><td>画面ごとの使い方・ホーム画面への追加手順・FAQ</td></tr>
+</table>
+
+<div class="box">
+ルーティング定義は <code>App.tsx</code>。全ページ共通のヘッダーは <code>components/NavBar.tsx</code>
+（ロゴクリックで <code>/</code> に戻る、モバイルではラベル非表示、右端にログイン状態を表示）。<br>
+<b>ログイン不要（閲覧）</b>: おすすめ・地図・スタジオ・レビュー投稿の一覧表示。<br>
+<b>ログイン必須（操作）</b>: お気に入り登録/削除、投稿の作成/編集/削除、AI相談、AI分析実行、現在地から新スタジオ探索
+（Places/Claude APIのコスト保護のため）。
+未ログインでこれらを操作しようとするとCognito Hosted UI（Googleログイン画面）へ自動遷移するか
+（お気に入り・投稿作成・AI分析実行・新スタジオ探索）、ページ自体がログイン案内を表示する（AI相談）。<br>
+TOP3カード（<code>RecommendationCard.tsx</code>）はスタジオ写真が登録されている場合、
+カード上部にヒーロー写真を表示する（その他一覧・お気に入り一覧はホバー/長押しプレビューのみ）。
+釣行AIアプリの釣具店検索に相当する機能は本アプリには無い（v1では対象外）。
+</div>
+
+<h2>2. フロントエンド ファイル依存関係</h2>
+
+<h3>2.1 ページ → フック → コンポーネント</h3>
+
+<table>
+<tr><th>ページ</th><th>使用するフック</th><th>使用する主なコンポーネント</th></tr>
+<tr><td>TopPage.tsx</td><td>useRecommendations, useFavorites</td><td>RecommendationCard, AiBatchButton, StudioDiscoveryButton, DetailModal, NearbyModal</td></tr>
+<tr><td>MapPage.tsx</td><td>（なし。api/client を直接呼ぶ）</td><td>@vis.gl/react-google-maps（外部ライブラリ）</td></tr>
+<tr><td>StudiosPage.tsx</td><td>（なし。api/client を直接呼ぶ）</td><td>ImagePreviewPopover</td></tr>
+<tr><td>FavoritesPage.tsx</td><td>useFavorites, useRecommendations</td><td>RecommendationCard, DetailModal</td></tr>
+<tr><td>PostsPage.tsx</td><td>usePosts</td><td>PostForm</td></tr>
+<tr><td>ChatPage.tsx</td><td>useChat</td><td>ChatInput, ChatHistoryPanel</td></tr>
+<tr><td>GuidePage.tsx</td><td>（なし。静的コンテンツのみ）</td><td>（なし）</td></tr>
+</table>
+
+<h3>2.2 コンポーネント間の依存</h3>
+
+<table>
+<tr><th>コンポーネント</th><th>使われる場所</th><th>内部で使うもの</th></tr>
+<tr><td>RecommendationCard.tsx</td><td>TopPage, FavoritesPage, NearbyModal</td><td>utils/score.ts, ImagePreviewPopover</td></tr>
+<tr><td>DetailModal.tsx</td><td>TopPage, FavoritesPage, NearbyModal</td><td>utils/score.ts, ImagePreviewPopover, api/client（写真アップロード）</td></tr>
+<tr><td>NearbyModal.tsx</td><td>TopPage</td><td>hooks/useGeolocation, utils/distance.ts, utils/score.ts, RecommendationCard</td></tr>
+<tr><td>ImagePreviewPopover.tsx</td><td>RecommendationCard, StudiosPage, DetailModal</td><td>hooks/useLongPress（imageUrlのみ表示。釣行AIアプリのWikipedia画像フォールバックは対象外のため無し）</td></tr>
+<tr><td>PostForm.tsx</td><td>PostsPage</td><td>api/client（署名付きアップロード・投稿作成）。★評価入力UIを含む</td></tr>
+<tr><td>ChatInput.tsx / ChatHistoryPanel.tsx</td><td>ChatPage</td><td>（propsで受けたコールバックのみ）ChatInputはhooks/useGeolocationで現在地共有トグルを実装</td></tr>
+<tr><td>AiBatchButton.tsx / StudioDiscoveryButton.tsx</td><td>TopPage</td><td>StudioDiscoveryButtonのみ api/client（runStudioDiscovery）を直接呼ぶ</td></tr>
+<tr><td>ProfileModal.tsx</td><td>NavBar</td><td>（propsで受けたコールバックのみ。API直呼びなし）</td></tr>
+</table>
+
+<h3>2.3 フック → APIクライアント</h3>
+
+<table>
+<tr><th>フック</th><th>呼び出す api/client.ts の関数</th></tr>
+<tr><td>useRecommendations.ts</td><td>getRecommendations, runAiBatch（未ログイン時はrunAiBatch実行前にsigninRedirect）</td></tr>
+<tr><td>useFavorites.ts</td><td>getFavorites, addFavorite, removeFavorite（未ログイン時はfetchせず空配列、トグル時はsigninRedirect）</td></tr>
+<tr><td>usePosts.ts</td><td>getPosts, createPost, updatePost, deletePost（削除失敗時はdeleteErrorに反映）</td></tr>
+<tr><td>useChat.ts</td><td>sendChatMessage, editChatMessage, getChatHistory, getChat, deleteChat, getPresignedUploadUrl, uploadImageToS3（429応答はレート制限メッセージとして表示。lat/lngを渡せる）</td></tr>
+<tr><td>useProfile.ts</td><td>getMyProfile, updateMyProfile（未ログイン時はfetchしない。NavBarから使われる）</td></tr>
+<tr><td>useGeolocation.ts</td><td>（なし。navigator.geolocation をラップするのみ。TopPage/StudioDiscoveryButton/ChatInputから使われる）</td></tr>
+<tr><td>useLongPress.ts</td><td>（なし。hover/長押し検知のみのUIフック）</td></tr>
+</table>
+
+<div class="box">
+<code>api/client.ts</code> が全エンドポイント呼び出しを一手に引き受ける唯一の窓口（共有axiosインスタンス）。
+釣行AIアプリにあった魚種画像取得用の <code>api/wikipedia.ts</code> は、対応する「設備画像」の概念が
+無いため本アプリには存在しない。
+</div>
+
+<h3>2.4 認証まわりのファイル</h3>
+
+<table>
+<tr><th>ファイル</th><th>役割</th></tr>
+<tr><td>auth/authConfig.ts</td><td>react-oidc-context の AuthProvider に渡す設定（authority/client_id/redirect_uri）。環境変数 VITE_COGNITO_* から組み立てる。Cognito Hosted UIの独自ログアウトURLを作る cognitoSignOut() もここに定義</td></tr>
+<tr><td>auth/AuthTokenSync.tsx</td><td>画面には何も描画しない同期用コンポーネント。ログイン状態が変わるたびに api/client.ts の setAuthToken() を呼び、以後のAPIリクエストのAuthorizationヘッダーを最新化する</td></tr>
+</table>
+
+<div class="box">
+<code>App.tsx</code> が <code>&lt;AuthProvider&gt;</code> でアプリ全体をラップし、直下に <code>&lt;AuthTokenSync /&gt;</code> をマウントする。
+各フック・コンポーネントは <code>react-oidc-context</code> の <code>useAuth()</code> を直接呼んでログイン状態を参照する
+（Reduxのような中央ストアは無く、Contextで完結）。
+</div>
+
+<h3>2.5 純粋ユーティリティ</h3>
+
+<table>
+<tr><th>ファイル</th><th>内容</th><th>ユニットテスト</th></tr>
+<tr><td>utils/score.ts</td><td>スコア→色/ラベル変換、評価・人気度アイコン変換、距離ベースのスコア近似再計算</td><td>utils/score.test.ts</td></tr>
+<tr><td>utils/distance.ts</td><td>haversine公式による2点間距離計算</td><td>utils/distance.test.ts</td></tr>
+<tr><td>types/index.ts</td><td>Studio/Recommendation/Favorite/Post/Chat等、全体で共有する型定義</td><td>-</td></tr>
+</table>
+
+<h2>3. バックエンド ファイル構成（Lambda）</h2>
+
+<h3>3.1 API系（backend/lambda/api/handlers.py 1ファイルに集約）</h3>
+
+<table>
+<tr><th>関数</th><th>エンドポイント</th><th>認証</th><th>読み書きするテーブル/バケット</th></tr>
+<tr><td>getRecommendationsHandler</td><td>GET /recommendations</td><td>不要</td><td>Recommendations（読）, Studios（読、結合用）</td></tr>
+<tr><td>getStudiosHandler</td><td>GET /studios</td><td>不要</td><td>Studios（読）</td></tr>
+<tr><td>putStudioImageHandler</td><td>PUT /studios/{studioId}/image</td><td>必須</td><td>Studios（更新）</td></tr>
+<tr><td>getPostsHandler</td><td>GET /posts</td><td>不要</td><td>Posts（読）, Users（読、投稿者の表示名を結合）</td></tr>
+<tr><td>postPostsHandler</td><td>POST /posts</td><td>必須</td><td>Posts（作成。userIdは_get_user_id(event)で取得しリクエストボディの値は無視）</td></tr>
+<tr><td>putPostHandler</td><td>PUT /posts/{postId}</td><td>必須</td><td>Posts（更新。content/imageUrl/ratingのうち指定されたフィールドのみ更新）</td></tr>
+<tr><td>deletePostHandler</td><td>DELETE /posts/{postId}</td><td>必須</td><td>Posts（削除。postId単一PKで所有者情報がキーに無いため、削除前にget_itemして自分の投稿か明示チェック。他人の投稿は403）</td></tr>
+<tr><td>getFavoritesHandler</td><td>GET /favorites</td><td>必須</td><td>Favorites（読）, Studios（読、結合用）</td></tr>
+<tr><td>postFavoritesHandler</td><td>POST /favorites</td><td>必須</td><td>Favorites（作成）</td></tr>
+<tr><td>deleteFavoritesHandler</td><td>DELETE /favorites/{studioId}</td><td>必須</td><td>Favorites（削除）</td></tr>
+<tr><td>postPresignUploadHandler</td><td>POST /uploads/presign</td><td>必須</td><td>S3 UploadsBucket（署名付きPOSTフォーム発行のみ）</td></tr>
+<tr><td>postChatHandler</td><td>POST /chat</td><td>必須</td><td>Chats（読み書き）, Usage（1日あたり利用回数のアトミック加算）, Studios・Recommendations（読、実データグラウンディング用）, S3（画像読み取り）, SSM（Claudeキー）</td></tr>
+<tr><td>getChatsHandler</td><td>GET /chats</td><td>必須</td><td>Chats（読、軽量版）</td></tr>
+<tr><td>getChatHandler</td><td>GET /chats/{chatId}</td><td>必須</td><td>Chats（読、全メッセージ）</td></tr>
+<tr><td>deleteChatHandler</td><td>DELETE /chats/{chatId}</td><td>必須</td><td>Chats（削除）</td></tr>
+<tr><td>getMyProfileHandler</td><td>GET /me</td><td>必須</td><td>Users（読）。未登録でも404にせずdisplayName:nullで200を返す</td></tr>
+<tr><td>putMyProfileHandler</td><td>PUT /me</td><td>必須</td><td>Users（作成/更新。表示名は1〜30文字でバリデーション）</td></tr>
+</table>
+
+<div class="box">
+「認証必須」のエンドポイントは <code>template.yaml</code> の <code>Api</code> リソースに定義した
+<code>CognitoAuthorizer</code>（Cognito User Pool Authorizer）を通過して初めて呼び出せる。
+通過後のイベントには <code>event.requestContext.authorizer.claims.sub</code>
+にユーザーの一意なID（Cognitoのsub）が入り、<code>_get_user_id(event)</code> ヘルパーがこれを取得する
+（Favorites/Chatsテーブルは元々userIdがpartition keyの一部のため、他人になりすまして
+アクセスすること自体ができない設計。PostsテーブルだけpostId単一PKのため上記の通り明示チェックが必要）。
+</div>
+
+<h3>3.2 バッチ系（backend/lambda/batch/）</h3>
+
+<table>
+<tr><th>ファイル</th><th>役割</th><th>他ファイルとの関係</th></tr>
+<tr><td>batch_common.py</td><td>DynamoDB/SSM/HTTP GETの共有ヘルパー。get_user_id/check_and_increment_daily_usage（handlers.pyの同名関数と同じロジックのapi/非依存版、コスト保護レート制限用）</td><td>generate_studio_score.py・discover_studios.py・admin_trigger.py から import される（循環import回避のため切り出し）</td></tr>
+<tr><td>generate_studio_score.py</td><td>generateStudioScoreBatch本体。口コミ評価・人気度・設備・最寄り駅距離・料金からスコア計算→Claude推薦理由生成→Recommendations保存</td><td>batch_common を import。handler冒頭で discover_studios.run_discovery() を呼ぶ（新スタジオ探索も内包）</td></tr>
+<tr><td>discover_studios.py</td><td>Google Places APIで新規スタジオを探索しStudiosへ追加する中核ロジック（run_discovery）。新規候補ごとに設備・収容人数の推測（Claude）、最寄り駅検索（Places Nearby Search）、公式サイト取得＋料金抽出（Place Details→サイト取得→Claude）を行う</td><td>batch_common を import。generate_studio_score.py から呼ばれる他、discoverStudiosBatch Lambdaとしても単独稼働</td></tr>
+<tr><td>admin_trigger.py</td><td>フロントのボタンから対象バッチをEvent(非同期)invokeする汎用ラッパー。環境変数RATE_LIMIT_ACTION/RATE_LIMIT_DAILYでコスト保護のレート制限を実装（上限超過時はバッチを起動せず429）</td><td>環境変数 BATCH_FUNCTION_NAME により、同一コードが adminRunAiBatch と adminRunStudioDiscovery の2つのLambdaとして再利用されている（レート制限の上限値もこの環境変数で関数ごとに変えている）</td></tr>
+</table>
+
+<div class="box">
+<code>backend/scripts/backfill_studio_details.py</code> はLambdaではなく、スコアリング項目の
+追加（収容人数・最寄り駅距離・料金）以前に発見済みだった既存スタジオへ、これらの
+フィールドを後追いで埋めるための一回限りのメンテナンススクリプト
+（<code>python backfill_studio_details.py [--dry-run]</code>）。discover_studios.py の
+guess_capacity/find_nearest_station_distance_m/fetch_place_website/scrape_price_from_websiteを
+そのまま再利用し、本番のDynamoDBテーブルを直接更新する。
+</div>
+
+<h3>3.3 SAM関数 ⇔ ハンドラー対応（infrastructure/template.yaml）</h3>
+
+<table>
+<tr><th>SAM論理ID</th><th>Handler指定</th><th>トリガー</th></tr>
+<tr><td>GenerateStudioScoreBatch</td><td>generate_studio_score.handler</td><td>EventBridge（毎日AM6:00 JST）／AdminRunAiBatchFunction経由</td></tr>
+<tr><td>DiscoverStudiosBatch</td><td>discover_studios.handler</td><td>AdminRunStudioDiscoveryFunction経由のみ（自動スケジュールなし）</td></tr>
+<tr><td>AdminRunAiBatchFunction</td><td>admin_trigger.handler（BATCH_FUNCTION_NAME=GenerateStudioScoreBatch, RATE_LIMIT_ACTION=ai-batch, RATE_LIMIT_DAILY=3）</td><td>POST /admin/run-ai-batch（認証必須）</td></tr>
+<tr><td>AdminRunStudioDiscoveryFunction</td><td>admin_trigger.handler（BATCH_FUNCTION_NAME=DiscoverStudiosBatch, RATE_LIMIT_ACTION=studio-discovery, RATE_LIMIT_DAILY=10）</td><td>POST /admin/run-studio-discovery（認証必須）</td></tr>
+</table>
+
+<div class="box">
+<b>Lambda関数名について:</b> API系・バッチ系とも <code>FunctionName</code> は明示指定せず、
+CloudFormationに自動採番させている。当初は釣行AIアプリと同じ命名で固定していたが、
+Lambda関数名はアカウント+リージョンで一意という制約に反して既存の釣行AIアプリの
+同名関数と衝突し、初回デプロイが失敗した経緯がある（AWS構成・サービス連携.html参照）。
+</div>
+
+<h2>4. DynamoDBテーブル一覧</h2>
+
+<table>
+<tr><th>物理名</th><th>論理ID</th><th>キー構成</th><th>書き込み元</th></tr>
+<tr><td>studio-studios</td><td>StudiosTable</td><td>studioId (PK)</td><td>discover_studios.run_discovery, putStudioImageHandler, backfill_studio_details.py（手動）</td></tr>
+<tr><td>studio-recommendations</td><td>RecommendationsTable</td><td>studioId (PK)</td><td>generate_studio_score.py（generateStudioScoreBatch実行時のみ）</td></tr>
+<tr><td>studio-favorites</td><td>FavoritesTable</td><td>userId (PK) + studioId (SK)</td><td>postFavoritesHandler / deleteFavoritesHandler</td></tr>
+<tr><td>studio-posts</td><td>PostsTable</td><td>postId (PK)</td><td>postPostsHandler / putPostHandler / deletePostHandler</td></tr>
+<tr><td>studio-chats</td><td>ChatsTable</td><td>userId (PK) + chatId (SK)</td><td>postChatHandler / deleteChatHandler</td></tr>
+<tr><td>studio-usage</td><td>UsageTable</td><td>userId (PK) + dateKey (SK, 例: "ai-batch#2026-07-29")</td><td>admin_trigger.py / postChatHandler内のcheck_and_increment_daily_usage（ADDによるアトミック加算）。TTL（expiresAt）で翌々日ごろ自動削除</td></tr>
+<tr><td>studio-users</td><td>UsersTable</td><td>userId (PK)</td><td>putMyProfileHandler（表示名の作成/更新）。getPostsHandlerがscanして投稿者名の結合に使う</td></tr>
+</table>
+
+<div class="box">
+S3バケット（<code>studio-search-app-uploads-&lt;アカウントID&gt;</code>）はスタジオ写真・投稿写真・
+チャット添付画像のアップロード先。書き込みは署名付きPOSTフォーム経由のみ、読み取り（GetObject）のみ公開許可。
+フロント配信用バケット（<code>studio-search-app-frontend-&lt;アカウントID&gt;</code>）は別物で、
+CloudFrontのOrigin Access Control経由でのみ読み取り可能な非公開バケット。
+</div>
+
+<h2>5. データの流れ（代表的なシナリオ）</h2>
+
+<h3>5.1「AI分析を実行」を押したとき</h3>
+<pre>
+TopPage.tsx（ボタン）
+ → useRecommendations.ts の triggerAiBatch()
+ → api/client.ts の runAiBatch()
+ → POST /admin/run-ai-batch
+ → AdminRunAiBatchFunction (admin_trigger.py)
+ → GenerateStudioScoreBatch を非同期invoke
+ → generate_studio_score.py の handler()
+    → discover_studios.run_discovery()（新スタジオ探索。新規候補ごとに設備・収容人数推測、
+      最寄り駅検索、公式サイト料金抽出を行いStudiosへ追加）
+    → Studios全件スキャン→スコア計算（最寄り駅距離を使用）→Claude推薦理由生成
+    → Recommendations へ保存
+ → フロントは GET /recommendations を定期的にポーリングして完了を検知
+</pre>
+
+<h3>5.2 チャットで写真つきの質問をしたとき</h3>
+<pre>
+ChatInput.tsx（写真選択 + 送信）
+ → useChat.ts の send()
+   → api/client.ts の getPresignedUploadUrl() → POST /uploads/presign
+   → api/client.ts の uploadImageToS3()（S3へ直接POST、バックエンドを経由しない）
+   → api/client.ts の sendChatMessage() → POST /chat
+ → postChatHandler（handlers.py）
+   → S3から画像バイトを取得 → Claudeへマルチモーダル入力として送信
+   → Chatsテーブルへ保存 → 応答を同期的に返却
+</pre>
+
+<h3>5.3「初心者でも通えるスタジオある？」とAI相談で聞いたとき</h3>
+<pre>
+ChatInput.tsx（現在地共有トグルON + 送信）
+ → useChat.ts の send()（lat/lngを含めてsendChatMessage呼び出し）
+ → POST /chat
+ → postChatHandler（handlers.py）
+   → _build_studios_context(lat, lng) がStudios・Recommendationsをscan→結合→
+     現在地からの距離（haversine）で近い順にソート→上位N件をテキスト化
+   → _generate_chat_reply() のsystem_instructionに上記テキストを埋め込む
+     （「データに無いスタジオは作り出さない」という指示も併記）
+   → Claudeが実データの中から回答を組み立てる
+</pre>
+
+<h2>6. 使用サービスとコストの目安</h2>
+
+<div class="box">
+釣行AIアプリと同じAWSアカウント上で運用しているため、AWS側の各サービスは既存分と合算で
+無料枠・低ボリューム内に収まる想定。<b>正確な最新料金は各サービスの公式ページで確認すること</b>
+（料金体系は変更されうるため、あくまで目安）。
+</div>
+
+<table>
+<tr><th>サービス</th><th>課金対象</th><th>個人利用規模での目安</th></tr>
+<tr><td>Lambda</td><td>呼び出し回数・実行時間</td><td>無料枠内（月100万回・40万GB秒まで無料）</td></tr>
+<tr><td>API Gateway (REST)</td><td>APIコール数</td><td>この規模ならごく僅か</td></tr>
+<tr><td>DynamoDB（7テーブル）</td><td>読み書きリクエスト数・ストレージ</td><td>無料枠+低ボリュームでごく僅か</td></tr>
+<tr><td>S3（静的ホスティング＋アップロード）</td><td>ストレージ・リクエスト数</td><td>数百円未満想定</td></tr>
+<tr><td>CloudFront</td><td>データ転送量</td><td>低ボリュームなら僅か</td></tr>
+<tr><td>SSM Parameter Store</td><td>Standard利用なら無料</td><td>無料</td></tr>
+<tr><td>EventBridge（日次バッチ起動）</td><td>ルール数・イベント数</td><td>無料枠内</td></tr>
+<tr><td>Cognito</td><td>月間アクティブユーザー数</td><td>無料枠内</td></tr>
+<tr><td>AWS Budgets</td><td>予算数</td><td>2つまで無料。今回1つのみ設定</td></tr>
+<tr><td>Anthropic Claude API（Haiku）</td><td>トークン数（画像添付・料金抽出のHTML抜粋は増加）</td><td><b>最も課金リスクが高い部分</b>。無料枠は無く完全従量課金だがHaikuは低単価。AI相談・AI分析・新スタジオ探索へのレート制限で抑制済み</td></tr>
+<tr><td>Google Places API</td><td>リクエスト数（Text Search・Nearby Search・Place Details）</td><td>新規スタジオ発見時のみ複数回課金。既存スタジオでは発生しない</td></tr>
+<tr><td>Google Maps JavaScript API</td><td>読み込み回数</td><td>低ボリューム</td></tr>
+<tr><td>Cloudflare Workers（ミラー）</td><td>リクエスト数</td><td>無料枠（1日10万リクエスト）で十分</td></tr>
+</table>
+
+<div class="box">
+AWS側は <code>CostBudget</code>（AWS Budgets、月$10・80%/100%到達時にメール通知）で自動監視している。
+Google Cloud側（Places/Maps）とAnthropic側（Claude）はAWS Budgetsの対象外のため、
+それぞれのコンソールで別途予算アラート・spend limitを手動設定する必要がある
+（README.mdの「10. 利用料アラート」参照）。
+</div>
+
+<h2>7. 関連ドキュメント</h2>
+<ul>
+<li>企画の背景・釣行AIアプリからの変換経緯: <a href="企画・設計アーカイブ.html">企画・設計アーカイブ.html</a></li>
+<li>AWS構成・サービス連携の詳細: <a href="AWS構成・サービス連携.html">AWS構成・サービス連携.html</a></li>
+<li>Lambda単位の詳細仕様: <a href="詳細設計.html">詳細設計.html</a></li>
+<li>非技術者向けの全体像: <a href="アプリまるわかりガイド.html">アプリまるわかりガイド.html</a></li>
+</ul>
+
+</body>
+</html>

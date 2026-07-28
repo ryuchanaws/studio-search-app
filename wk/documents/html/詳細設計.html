@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Lambda詳細設計書（レンタルスタジオサーチアプリ）</title>
+<style>
+body { font-family: Arial, sans-serif; line-height:1.6; padding:24px; }
+h1 { color:#7c3aed; }
+h2 { border-left:6px solid #7c3aed; padding-left:10px; margin-top:28px; }
+h3 { color:#9333ea; }
+.box { background:#f7f5fc; padding:12px; border-radius:6px; margin:10px 0; }
+pre { background:#eee; padding:10px; overflow-x:auto; }
+table { border-collapse: collapse; width: 100%; margin-top:10px; }
+td, th { border:1px solid #ccc; padding:8px; }
+th { background:#f3e8ff; }
+</style>
+</head>
+
+<body>
+
+<h1>Lambda詳細設計書（レンタルスタジオサーチアプリ）</h1>
+
+<div class="box">
+本設計書は、レンタルスタジオサーチアプリにおけるAWS Lambda関数単位の責務・入出力・処理フローを定義する。
+釣行AIアプリ（fishing-ai-app）の同名資料をベースに、ドメイン変換とスコアリング刷新を反映している。
+</div>
+
+<hr>
+
+<h2>1. 設計方針</h2>
+
+<ul>
+<li>1 Lambda = 1責務（単一責任原則）</li>
+<li>API系とバッチ系を分離（SAMの別CodeUriパッケージ、コード共有不可）</li>
+<li>DynamoDBアクセスは原則Lambda経由</li>
+<li>リアルタイム処理は禁止（バッチ中心）</li>
+<li>実在性に関わる情報（座標・スタジオ名・料金）はGoogle Places APIまたは公式サイトの実テキストのみを情報源とし、AIには生成させない</li>
+</ul>
+
+<h2>2. Lambda一覧（API系）</h2>
+
+<table>
+<tr><th>関数名</th><th>役割</th><th>トリガー</th><th>認証</th></tr>
+<tr><td>getRecommendationsHandler</td><td>おすすめ一覧取得</td><td>API Gateway（GET /recommendations）</td><td>不要</td></tr>
+<tr><td>getStudiosHandler</td><td>スタジオ一覧取得</td><td>API Gateway（GET /studios）</td><td>不要</td></tr>
+<tr><td>updateStudioImageHandler</td><td>スタジオ写真URLの設定</td><td>API Gateway（PUT /studios/{studioId}/image）</td><td>必須</td></tr>
+<tr><td>getPostsHandler</td><td>レビュー取得</td><td>API Gateway（GET /posts）</td><td>不要</td></tr>
+<tr><td>createPostHandler</td><td>レビュー投稿の作成（★評価含む）</td><td>API Gateway（POST /posts）</td><td>必須</td></tr>
+<tr><td>updatePostHandler</td><td>レビュー投稿の編集（本文・★評価・写真）</td><td>API Gateway（PUT /posts/{postId}）</td><td>必須</td></tr>
+<tr><td>deletePostHandler</td><td>レビュー投稿の削除</td><td>API Gateway（DELETE /posts/{postId}）</td><td>必須</td></tr>
+<tr><td>createFavoriteHandler</td><td>お気に入り登録</td><td>API Gateway（POST /favorites）</td><td>必須</td></tr>
+<tr><td>deleteFavoriteHandler</td><td>お気に入り削除</td><td>API Gateway（DELETE /favorites/{studioId}）</td><td>必須</td></tr>
+<tr><td>getFavoritesHandler</td><td>お気に入り取得</td><td>API Gateway（GET /favorites）</td><td>必須</td></tr>
+<tr><td>presignUploadHandler</td><td>S3アップロード用の署名付きURL発行</td><td>API Gateway（POST /uploads/presign）</td><td>必須</td></tr>
+<tr><td>postChatHandler</td><td>AIチャットへのメッセージ送信・Claude応答生成・メッセージ編集</td><td>API Gateway（POST /chat）</td><td>必須</td></tr>
+<tr><td>getChatsHandler</td><td>チャット履歴一覧取得</td><td>API Gateway（GET /chats）</td><td>必須</td></tr>
+<tr><td>getChatHandler</td><td>特定チャットの全メッセージ取得</td><td>API Gateway（GET /chats/{chatId}）</td><td>必須</td></tr>
+<tr><td>deleteChatHandler</td><td>チャットの削除</td><td>API Gateway（DELETE /chats/{chatId}）</td><td>必須</td></tr>
+<tr><td>getMyProfileHandler</td><td>自分の表示名（プロフィール）取得</td><td>API Gateway（GET /me）</td><td>必須</td></tr>
+<tr><td>putMyProfileHandler</td><td>表示名の設定・更新</td><td>API Gateway（PUT /me）</td><td>必須</td></tr>
+</table>
+
+<h2>3. Lambda一覧（バッチ系）</h2>
+
+<table>
+<tr><th>関数名</th><th>役割</th><th>トリガー</th></tr>
+<tr><td>generateStudioScoreBatch</td><td>新規スタジオ探索＋スコア生成＋AI推薦理由生成</td><td>EventBridge（毎日AM6:00 JST）／adminRunAiBatch経由</td></tr>
+<tr><td>adminRunAiBatch</td><td>フロントの「AI分析を実行」ボタンからgenerateStudioScoreBatchを起動する薄いラッパー。1日3回のレート制限</td><td>API Gateway（POST /admin/run-ai-batch、認証必須）</td></tr>
+<tr><td>discoverStudiosBatch</td><td>Google Places APIで新規レンタルスタジオ候補を探索しStudiosテーブルへ追加</td><td>adminRunStudioDiscovery経由のみ（自動スケジュールなし）</td></tr>
+<tr><td>adminRunStudioDiscovery</td><td>フロントの「現在地から新スタジオを探す」ボタンからdiscoverStudiosBatchを起動する薄いラッパー（adminRunAiBatchと同一コードをBATCH_FUNCTION_NAME環境変数の差し替えで再利用）。1日10回のレート制限</td><td>API Gateway（POST /admin/run-studio-discovery、認証必須）</td></tr>
+</table>
+
+<div class="box">
+釣行AIアプリのtackle_shops.py（searchTackleShops）に相当する機能は無い（v1では対象外）。
+</div>
+
+<h2>4. 個別設計</h2>
+
+<h3>getRecommendationsHandler</h3>
+
+<div class="box">
+目的：ユーザーにおすすめスタジオ一覧（スコア降順）を返却。フロント側でTOP3とその他に分けて表示する。
+</div>
+
+<h4>処理フロー</h4>
+<pre>
+1. RecommendationsTable全件取得
+2. StudiosTable全件取得し studioId で結合（studio フィールドとして付与）
+3. score降順でソート
+4. レスポンス返却
+</pre>
+
+<h4>出力（1件分の例）</h4>
+<pre>
+{
+  "studioId": "studio-6ae9be37",
+  "score": 78.4,
+  "facilityTags": ["鏡張り", "フローリング", "音響設備"],
+  "capacityCategory": "小グループ向け（6〜10人）",
+  "reason": "口コミ評価が高く、駅から近いのが魅力です。",
+  "distance": 12.3,
+  "stationDistanceKm": 0.49,
+  "cost": 1000,
+  "ratingScore": 88.0,
+  "popularityScore": 45.0,
+  "updatedAt": "2026-07-29T02:10:00+00:00",
+  "studio": { "studioId": "studio-6ae9be37", "name": "...", "lat": 35.6, "lng": 139.7, ... }
+}
+</pre>
+
+<h3>generateStudioScoreBatch</h3>
+
+<div class="box">
+目的：全スタジオのスコア計算＋AI推薦理由生成。handlerの冒頭で discover_studios.run_discovery() を
+呼び出し、新規スタジオ探索も内包する（「AI分析を実行」が新スタジオ探索とスコア再計算の両方を兼ねる）。
+</div>
+
+<h4>スコアロジック（現行）</h4>
+<pre>
+score = rating_score        * 0.4   # Places rating(0-5) を 0-100 に正規化。無ければ中立の60
+      + popularity_score    * 0.2   # user_ratings_total を0-100に正規化（200件で頭打ち）
+      + appeal_score        * 0.2   # 設備タグの一致数によるヒューリスティック
+      - station_dist_norm   * 0.1   # 最寄り駅からの距離（STATION_DISTANCE_NORM_KM=1.5kmで頭打ち）
+      - cost_norm           * 0.1   # 利用料金（5000円で頭打ち。不明なら0扱い）
+</pre>
+
+<div class="box">
+重み係数の合計は0.8のため、満点条件でもスコア上限は80点（釣行AIアプリのcalc_score()と同じ構造）。
+</div>
+
+<div class="box">
+<b>距離をstation_distance_kmに変更した経緯:</b> 当初は釣行AIアプリと同じく「基準地点（東京駅）
+からの距離」を使っていたが、全国のスタジオを対象にする本アプリではこの指標に意味が薄かった。
+また、レンタルスタジオは天気・潮汐のような「毎日変わる」要素が無いため、スコアの中で
+実質的に唯一動きうる「距離」要素を、ユーザーの現在地に依存しないスタジオ自体の固有属性
+（最寄り駅からのアクセス、Places Nearby Searchで取得）に置き換えた。基準地点からの距離
+（<code>distanceKm</code>）自体は削除せず、フロントの「現在地から探す」機能
+（<code>recalcScoreForDistance</code>）が引き続き使用するため<code>distance</code>として
+Recommendationsへ保存し続けている。この2つの「距離」は別概念であり混同しないよう注意。
+</div>
+
+<h4>reason使い回しによるAPI呼び出し削減</h4>
+<div class="box">
+スタジオ数が数十〜百件規模になると、毎回全件についてAIに推薦理由(reason)を書かせるのは
+コスト・時間の面で無駄が大きい。<code>_should_regenerate_reason(existing, new_score)</code>により、
+以下のいずれにも該当しないスタジオは前回のreason文をそのまま使い回し、Claude呼び出しをしない:
+<ul>
+<li>そのスタジオの推薦データが存在しない（初回）</li>
+<li>スコアが前回から<code>REASON_SCORE_CHANGE_THRESHOLD</code>（10.0）以上動いた</li>
+<li>前回の生成から<code>REASON_MAX_AGE_DAYS</code>（3日）以上経過している</li>
+</ul>
+スコア自体（DynamoDBのupdatedAt含む）は使い回し対象外で毎回必ず再計算・更新するため、
+フロント（useRecommendations.ts）の「全スタジオのupdatedAtが実行開始時刻より新しくなったら完了」
+というポーリング判定には影響しない。この仕組みは釣行AIアプリでGemini無料枠の枯渇障害を
+きっかけに導入されたものを、v1から最初に組み込んでいる。
+</div>
+
+<h3>discover_studios.run_discovery()</h3>
+
+<div class="box">
+目的：新規レンタルスタジオ候補をGoogle Places APIで探索し、Studiosテーブルに追加する中核ロジック。
+generateStudioScoreBatch のhandler冒頭（位置指定なし）と、discoverStudiosBatch のhandler
+（「現在地から新スタジオを探す」ボタン経由、位置指定あり）の両方から呼ばれる共通関数。
+</div>
+
+<h4>処理</h4>
+<pre>
+Studios全件取得（重複判定用）
+ → Google Places API Text Search
+    ・位置指定なし: "ダンススタジオ レンタル" 等の全国向け複数クエリ
+    ・位置指定あり: "レンタルスタジオ" 1クエリ + location/radius(15km)パラメータで近傍に絞り込み
+ → 既存スタジオと緯度経度がhaversine距離300m以内なら重複として除外
+ → 新規候補ごとに（既存スタジオはここに到達しないため一回きりのコスト）:
+    ・Claude APIで店名・住所から想定される設備を推測（guess_facilities）
+    ・Claude APIで店名・住所から収容人数の目安を推測（guess_capacity、3区分）
+    ・Places Nearby Search（type=train_station, rankby=distance）で最寄り駅までの距離を算出
+    ・Place Details（fields=website）で公式サイトURLを取得できればサイトを取得し、
+      Claudeに実際に書かれている料金（円/時間）の抽出を試みる（scrape_price_from_website）
+ → 基準地点（位置指定時はその座標、なければ東京駅）からのdistanceKmを算出（現在地から探す機能用）
+ → Studiosテーブルへput_item（placeIdも保存し、将来の再取得に備える）
+</pre>
+
+<div class="box">
+座標・スタジオ名などの実在性に関わる情報はGoogle Places APIの結果のみを採用し、
+LLM（Claude）には生成させない（存在しないスタジオをAIが作り出すハルシネーションを避けるため）。
+Claudeは設備・収容人数の推測、公式サイトに実在するテキストからの料金抽出という、
+「間違っても実害が小さい／根拠となる実データが存在する」情報生成にのみ用いる。
+料金抽出プロンプトは「サイトに明記されていなければ"不明"とだけ答える」よう明示的に指示しており、
+金額をAIが推測で作り出すことはない設計にしている。
+</div>
+
+<div class="box">
+generate_studio_score.py が discover_studios.py の run_discovery() を直接importして呼び出すため、
+逆方向のimport（discover_studios→generate_studio_score）は循環importになり不可能。共有ヘルパー
+（DynamoDB/SSMアクセス・HTTP GET）は batch_common.py に切り出し、両モジュールがそこから import する。
+</div>
+
+<h3>backfill_studio_details.py（一回限りのメンテナンススクリプト）</h3>
+
+<div class="box">
+目的：収容人数・最寄り駅距離・料金のスコアリング項目を追加する前に発見済みだった既存スタジオへ、
+これらのフィールドを後追いで埋める。run_discovery()は300m以内の重複を検出済み候補として
+スキップするため、既存スタジオはこの拡張の対象に自然には到達しない。
+</div>
+
+<h4>処理</h4>
+<pre>
+StudiosTable全件scan → capacityCategory/nearestStationDistanceMが未設定の項目を抽出
+ → 各項目について:
+    guess_capacity() / find_nearest_station_distance_m() を実行
+    placeIdが無ければ Places Find Place From Text（studio名+座標）で復旧を試みる
+    placeIdが取得できればfetch_place_website()→scrape_price_from_website()で料金を試みる
+ → DynamoDB update_item で該当フィールドのみ更新（他フィールドは変更しない）
+</pre>
+
+<div class="box">
+本番のDynamoDBテーブル・実際のGoogle Places/Anthropic APIキーを直接使う（motoでのモックは行わない）
+ため、Lambdaとしてはデプロイせず、ローカル端末のAWS認証情報で<code>python backfill_studio_details.py</code>
+として手動実行する。<code>--dry-run</code>オプションでDynamoDBを更新せず結果のみ確認できる。
+</div>
+
+<h3>presignUploadHandler / updateStudioImageHandler / createPostHandler</h3>
+
+<div class="box">
+目的：スタジオ写真・レビュー写真のアップロードと、レビュー投稿の作成。
+</div>
+
+<h4>処理フロー（写真アップロード）</h4>
+<pre>
+1. フロントが POST /uploads/presign を呼び、S3への署名付きPOSTフォーム（uploadUrl + uploadFields、有効期限5分）を取得
+2. フロントがそのフォームへ画像ファイルをmultipart/form-dataでPOST（Lambda/API Gatewayを経由しない。ペイロード制限回避のため）
+3. アップロード完了後、公開URL（publicUrl）を
+   PUT /studios/{studioId}/image （スタジオ写真）または
+   POST /posts のimageUrl（レビュー写真）または
+   POST /chat のimageUrl（チャット添付）として保存
+</pre>
+
+<div class="box">
+アップロード先S3バケット（UploadsBucket）はGetObjectのみ公開許可、書き込みは署名付きURL経由のみに
+限定している。<code>generate_presigned_post</code>のConditionsに
+<code>["content-length-range", 1, 8388608]</code>（8MB）を指定し、S3側にアップロード上限を強制させている。
+</div>
+
+<h3>postChatHandler / getChatsHandler / getChatHandler</h3>
+
+<div class="box">
+目的：写真添付にも対応したAIチャット機能。写真添付（端末アルバムから選択 or その場で撮影、
+どちらも同じ<code>&lt;input type="file"&gt;</code>で実現し、撮影用はcapture="environment"属性を付与）を
+チャット入力の一部として統合している。
+</div>
+
+<h4>処理フロー（POST /chat）</h4>
+<pre>
+1. UsageTableでレート制限チェック（1日30件、DAILY_CHAT_LIMIT）
+2. editIndexが指定されていれば、該当インデックス以降のmessagesを切り捨ててから処理を続行（メッセージ編集）
+3. chatId が未指定なら新規チャットとしてuuid発行、指定されていればChatsTableから既存messagesを読み込み
+4. ユーザーメッセージ（+ imageUrlがあればS3から画像バイトを取得）をmessagesに追記
+5. _build_studios_context(lat, lng) がStudios・Recommendationsをscan→結合→ソート→
+   上位N件をテキスト化し、実データグラウンディング用のコンテキストとして構築
+6. Claudeへ直近の会話履歴 + 今回のメッセージ（+画像）+ 実データコンテキストをマルチモーダル入力として送信
+   （システムプロンプトで「ダンス・ヨガの専門家アシスタント」という役割を明示。
+   「データに無いスタジオは作り出さない」という指示も明記）
+7. 応答をmessagesに追記し、ChatsTableへput_item（アイテム全体を上書き）
+8. { chatId, reply, updatedAt } を同期的に返却
+</pre>
+
+<div class="box">
+他のAI機能（generateStudioScoreBatch等）は API Gateway の29秒タイムアウトを避けるため
+非同期トリガー+ポーリング方式を採っているが、チャットはUX上ポーリングが合わないため
+<b>同期呼び出しのまま</b>とし、Lambda Timeoutを29秒より短い25秒に設定することで対処している
+（テキスト+画像1枚のClaude呼び出しは通常数秒〜十数秒で収まる想定）。
+</div>
+
+<div class="box">
+GET /chats は履歴パネルの一覧表示用に messages を含まない軽量なレスポンス（chatId/title/updatedAtのみ）を返す。
+GET /chats/{chatId} は履歴から会話を再開する際に全メッセージを返す。「新しい会話」開始時はDBに何も書き込まず、
+次にメッセージを送信した時点で初めて新規チャットとして保存される。
+</div>
+
+<div class="box">
+<b>メッセージ編集:</b> 自分の発言に表示される鉛筆アイコンから本文を訂正して再送信できる。
+フロント（ChatPage.tsx）が編集対象のインデックスを保持し、送信時に<code>editIndex</code>として
+バックエンドへ渡す。<code>postChatHandler</code>は該当インデックス以降の全メッセージ（訂正対象の
+発言＋それ以降のAI応答）を切り捨ててから、訂正後の本文で通常の送信フローを再実行する
+（AIの回答も作り直される）。
+</div>
+
+<h3>コスト保護レート制限（admin_trigger.py）</h3>
+
+<div class="box">
+目的：AI分析実行・現在地から新スタジオ探索はいずれもPlaces/Claude APIの呼び出しを伴い課金対象のため、
+AI相談（postChatHandlerのDAILY_CHAT_LIMIT）と同じ思想で1ユーザー1日あたりの上限を設けている。
+api/とbatch/はSAMの別デプロイパッケージのためhandlers.pyのロジックは共有できず、
+<code>batch_common.py</code>に<code>get_user_id</code>・<code>check_and_increment_daily_usage</code>として
+複製している。
+</div>
+
+<table>
+<tr><th>関数</th><th>レート制限アクション名</th><th>1日の上限</th><th>設定方法</th></tr>
+<tr><td>adminRunAiBatch</td><td>ai-batch</td><td>3回</td><td>template.yamlのRATE_LIMIT_ACTION/RATE_LIMIT_DAILY環境変数</td></tr>
+<tr><td>adminRunStudioDiscovery</td><td>studio-discovery</td><td>10回</td><td>同上（同じadmin_trigger.pyを異なる環境変数で再利用）</td></tr>
+</table>
+
+<div class="box">
+上限に達している場合はバッチ起動・Places API検索を一切行わずに429
+（<code>{"status": "rate_limited", "message": "..."}</code>）を返す。
+カウンタはUsageTable（userId + dateKey）にADD式でアトミック加算し、TTLで翌々日ごろ
+自動的に古いカウンタが削除される（postChatHandlerと全く同じ仕組み）。
+</div>
+
+<h3>getMyProfileHandler / putMyProfileHandler</h3>
+
+<div class="box">
+目的：ユーザーが自分の表示名を設定・編集できるようにする。UsersTable（userId単一PK）に
+<code>displayName</code>・<code>email</code>・<code>createdAt</code>・<code>updatedAt</code> を保存する。
+GET /me は未登録でも404にせず <code>displayName: null</code> で200を返す。<br><br>
+投稿一覧（getPostsHandler）は、SpotsTable/FavoritesTableの結合と同じ「NoSQLはJOINできないので
+アプリ側でuserId→表示名の辞書を作って結合する」パターンでUsersTableをscanし、各投稿に
+<code>authorName</code>（未設定ユーザーは"匿名"）を付与する。
+</div>
+
+<h2>5. 非機能要件</h2>
+
+<ul>
+<li>API応答：1〜2秒以内（AI分析・チャットを除く）</li>
+<li>バッチ：日次1回 + 手動実行</li>
+<li>エラーハンドリング：外部API失敗時はフォールバック値で処理継続、例外を投げずバッチ全体を止めない</li>
+</ul>
+
+<h2>6. セキュリティ</h2>
+
+<h3>6.1 認証範囲</h3>
+<div class="box">
+<b>閲覧は未ログインでも可能</b>（おすすめ・地図・スタジオ一覧・投稿一覧）。
+<b>操作（お気に入り・投稿作成/削除・AI相談・AI分析実行・新スタジオ探索）はログイン必須</b>という方針とした
+（誰でも見られるアプリという性質を保ちつつ、書き込み系・課金系だけを保護する狙い。
+釣行AIアプリの方針をそのまま踏襲）。
+</div>
+
+<h3>6.2 認証フロー</h3>
+<pre>
+フロント（react-oidc-context, Authorization Code + PKCE）
+ → Cognito Hosted UI（/oauth2/authorize）へリダイレクト
+ → Hosted UI上でGoogleログイン（Cognito側のGoogle IdP連携経由）
+ → Cognitoの/oauth2/idpresponseへコールバック → 認可コードをid_tokenに交換
+ → 以後のAPIリクエストに Authorization: Bearer &lt;id_token&gt; を付与
+ → API Gateway の CognitoAuthorizer（User Pool Authorizer）がid_tokenを検証
+ → 検証成功時、Lambda側イベントに event.requestContext.authorizer.claims.sub が入る
+ → handlers.py の _get_user_id(event) がこれを実ユーザーIDとして使用
+</pre>
+
+<div class="box">
+CognitoはOIDC標準の <code>end_session_endpoint</code> をディスカバリドキュメントに含めないため、
+ログアウトは react-oidc-context の標準 <code>signoutRedirect()</code> ではなく、
+Hosted UI独自の <code>/logout</code> エンドポイントへ直接遷移する方式で実装している
+（<code>frontend/src/auth/authConfig.ts</code> の <code>cognitoSignOut()</code>。釣行AIアプリと同じ実装）。
+</div>
+
+<div class="box">
+User PoolはCognitoドメイン<code>studio-search-app-&lt;AWSアカウントID&gt;.auth.ap-northeast-1.amazoncognito.com</code>
+を使用（アカウントID込みの標準形式）。釣行AIアプリで短いカスタムプレフィックスへの変更を試みて
+デプロイ失敗（Cognitoは1つのUser Poolに同時に2つのドメインを持てない）した教訓があるため、
+本アプリでは当初からこの標準形式を採用し、変更は行っていない。
+</div>
+
+<h3>6.3 所有者チェック</h3>
+<div class="box">
+Favorites/Chatsテーブルは <code>userId</code> がpartition keyの一部のため、他人のuserIdでは
+そもそも該当データにアクセスできない設計（追加の所有者チェック不要）。
+一方Postsテーブルは <code>postId</code> 単一PKで所有者情報がキーに含まれないため、
+deletePostHandler/updatePostHandlerで更新・削除前に <code>get_item</code> して投稿の
+<code>userId</code> とリクエスト元の <code>userId</code> を比較し、一致しなければ403を返す
+明示的なチェックを行っている。
+</div>
+
+<h2>7. テスト戦略</h2>
+
+<ul>
+<li>バックエンド: pytest。純粋関数（calc_score・haversine_km・guess_capacity・normalize_*等）の
+単体テストに加え、moto でDynamoDB/S3をモックしたハンドラーレベルのテスト
+（投稿・チャットの作成→削除ライフサイクル、写真アップロード等）。67件から
+スコアリング刷新で7件追加し67件</li>
+<li>フロントエンド ユニットテスト: Vitest + React Testing Library（utils/の純粋関数、
+RecommendationCardのレンダリングテスト）。18件</li>
+<li>フロントエンド E2E・VRT: 釣行AIアプリでは導入していたPlaywrightによるE2E/VRTを、
+v1のスコープでは見送っている（package.jsonに@playwright/testを含めていない）</li>
+<li>CI: <code>.github/workflows/test.yml</code> が <code>pull_request → main</code> をトリガーに実行される
+（<code>deploy.yml</code> の <code>push → main</code> トリガーとは分離。デプロイは行わずテストのみ。
+フロントエンドジョブは<code>npm run build</code>も実行し型エラーを検出する）</li>
+</ul>
+
+<h2>8. まとめ</h2>
+
+<div class="box">
+Lambdaは「API処理」と「バッチ処理」に完全分離し、スケーラブルかつ低コストな構成とする。
+釣行AIアプリのアーキテクチャを流用しつつ、ドメイン固有の判断（最寄り駅距離・収容人数・
+公式サイトからの料金抽出）を新たに組み込んでいる。
+</div>
+
+</body>
+</html>

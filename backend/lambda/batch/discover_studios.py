@@ -468,6 +468,8 @@ def run_discovery(location_bias: Optional[dict[str, float]] = None) -> dict[str,
             "imageUrl": image_url or "",
             "rating": Decimal(str(c["rating"])) if c.get("rating") is not None else None,
             "userRatingsTotal": int(c["user_ratings_total"]) if c.get("user_ratings_total") is not None else 0,
+            # 既存データの再取得（バックフィル）でPlace Detailsを直接引けるように保存しておく
+            "placeId": place_id,
         })
         # 次の候補との重複判定にも反映させる
         existing_coords.append((c["lat"], c["lng"]))

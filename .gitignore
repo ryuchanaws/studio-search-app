@@ -19,3 +19,5 @@ frontend/blob-report/
 # 環境変数（実際の値はGitHub Secrets/ローカル.envで管理）
 frontend/.env
 .env
+# backfill_studio_details.py 実行時の一時ログ
+backend/scripts/*.log
