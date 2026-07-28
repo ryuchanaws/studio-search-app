@@ -1,0 +1,69 @@
+name: Test Studio Search App
+
+# ─────────────────────────────────────────────
+# トリガー設定
+# - mainブランチへのPull Request作成/更新時に自動実行
+# - デプロイ（deploy.yml）はmainへのpush時のみ実行される別ワークフローのため、
+#   ここではテストのみを行い、AWSへのデプロイは一切行わない
+# ─────────────────────────────────────────────
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # ═══════════════════════════════════════════
+  # JOB 1: バックエンドユニットテスト（pytest）
+  # 実AWSには接続せず、moto でDynamoDB/S3をモックする
+  # ═══════════════════════════════════════════
+  backend-tests:
+    name: Backend Unit Tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements-dev.txt
+            backend/lambda/api/requirements.txt
+            backend/lambda/batch/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          pip install \
+            -r backend/requirements-dev.txt \
+            -r backend/lambda/api/requirements.txt \
+            -r backend/lambda/batch/requirements.txt
+
+      - name: Run pytest
+        run: pytest backend/tests -v
+
+  # ═══════════════════════════════════════════
+  # JOB 2: フロントエンドユニットテスト（Vitest）
+  # ═══════════════════════════════════════════
+  frontend-unit-tests:
+    name: Frontend Unit Tests (Vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Run Vitest
+        run: npm run test
+        working-directory: frontend
+
+      - name: Build
+        run: npm run build
+        working-directory: frontend

@@ -1,0 +1,5 @@
+# requirements.txt (API Lambda)
+# AWS SDK for Python。DynamoDB へのアクセス（boto3.resource("dynamodb")）に使用する。
+boto3
+# postChatHandler（AIチャット）がClaude APIをマルチモーダル呼び出しするために使用
+anthropic

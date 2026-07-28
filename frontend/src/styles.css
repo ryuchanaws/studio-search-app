@@ -1,0 +1,1620 @@
+/* ===== RESET & BASE ===== */
+/* 全要素のボックスサイズ計算を統一し、デフォルトの余白をリセットする */
+*, *::before, *::after  {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ===== CSS カスタムプロパティ（デザイントークン） ===== */
+/* アプリ全体で共有する色・サイズ・影の変数を定義する */
+/* var(--変数名) で参照することで一括変更が可能 */
+:root  {
+
+  /* 背景色: 3段階の明度で奥行きを表現 */
+  --bg: #0f1117;
+  /* ページ背景（最も暗い） */;
+  --bg2: #1a1d27;
+  /* カード背景 */;
+  --bg3: #232635;
+  /* インプット・スタット背景（最も明るい） */;
+
+  /* ボーダー・テキスト */
+  --border: #2e3148;
+  /* 区切り線・枠線 */;
+  --text: #e8eaf0;
+  /* メインテキスト */;
+  --text2: #9ca3af;
+  /* サブテキスト・ラベル */;
+
+  /* アクセントカラー */
+  --accent: #a855f7;
+  /* メインアクセント（紫）: 高スコア・アクティブ状態 */;
+  --accent2: #ec4899;
+  /* セカンダリアクセント（ピンク）: ナビボタン */;
+  --danger: #e05c5c;
+  /* 危険・お気に入り（赤） */;
+  --warn: #f5a623;
+  /* 警告・2位バッジ（オレンジ） */;
+
+  /* 形状 */
+  --radius: 12px;
+  /* カード・モーダルの角丸 */;
+  --radius-sm: 8px;
+  /* ボタン・タグの角丸 */;
+  --shadow: 0 4px 24px rgba(0,0,0,0.4);
+  /* カードホバー時の影 */;
+
+}
+
+/* ベーススタイル: フォント・行間・最小高さを設定 */
+body  {
+
+  background: var(--bg);
+  color: var(--text);
+  /* システムフォントスタック: macOS / Windows / Android に最適なフォントを自動選択 */
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  min-height: 100vh;
+
+}
+
+/* ===== LAYOUT ===== */
+/* NavBar（固定）+ main コンテンツの縦並びレイアウト */
+.app-layout  {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* max-width で横幅を制限し中央揃え。padding-top は固定 NavBar の高さ分 */
+.main-content  {
+  flex: 1;
+  padding: 16px;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+  padding-top: 80px;
+}
+
+/* ===== NAVBAR ===== */
+/* 画面上部に固定。backdrop-filter でスクロール時も読みやすくする */
+.navbar  {
+
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: rgba(15,17,23,0.92);
+  /* 半透明で背景をぼかす */;
+  backdrop-filter: blur(12px);
+  /* ガラスモーフィズム効果 */;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  height: 60px;
+
+}
+
+/* ブランドロゴエリア: アイコン + アプリ名 */
+.nav-brand  {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.nav-logo  {
+  font-size: 22px;
+}
+
+.nav-title  {
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+
+/* ナビゲーションリンク一覧 */
+.nav-links  {
+  display: flex;
+  gap: 4px;
+}
+
+/* 各リンク: アイコン + テキストの縦並び */
+.nav-link  {
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  color: var(--text2);
+  text-decoration: none;
+  font-size: 11px;
+  transition: all 0.2s;
+
+}
+
+.nav-link:hover  {
+  color: var(--text);
+  background: var(--bg3);
+}
+
+/* react-router-dom の NavLink が付与するアクティブクラス */
+.nav-link.active  {
+  color: var(--accent);
+}
+
+/* ログイン状態表示エリア */
+.nav-auth  {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.nav-auth-email  {
+  font-size: 12px;
+  color: var(--text2);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ログインボタン: アイコン+ラベルのため、正方形固定の.icon-btnより横幅を可変にする */
+.nav-auth .icon-btn  {
+  width: auto;
+  padding: 0 12px;
+  gap: 6px;
+}
+
+.nav-auth-label  {
+  font-size: 13px;
+}
+
+/* ===== PAGE ===== */
+/* 全ページ共通: 下部に余白を確保 */
+.page  {
+  padding-bottom: 40px;
+}
+
+/* ページヘッダー: タイトルと右側のアクションボタンを両端揃え */
+.page-header  {
+
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 24px;
+
+}
+
+.page-title  {
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.page-sub  {
+  color: var(--text2);
+  font-size: 13px;
+}
+
+/* ページヘッダー右側のアイコンボタン群（現在地・更新など）を横並びに */
+.page-header-actions  {
+  display: flex;
+  gap: 8px;
+}
+
+/* ===== AI BATCH BUTTON ===== */
+/* 「AI分析を実行」ボタンのラッパー。StudioDiscoveryButton と横並びに配置する。
+   align-items省略時のデフォルト(stretch)だと、AI分析ボタンの下に結果メッセージが
+   出て高さが伸びたときに、隣のボタン（メッセージを持たない）まで
+   その高さに引き伸ばされてしまうため flex-start にして各ボタンが
+   自分のコンテンツの高さを保つようにしている */
+.ai-batch-section  {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+/* ボタン + 結果メッセージの縦並び。
+   align-items省略時のデフォルト(stretch)だと、下の結果メッセージが長いときに
+   ボタン幅がそれに釣られて伸びてしまうため flex-start にして
+   ボタンとメッセージそれぞれが自分のコンテンツ幅を保つようにしている */
+.ai-batch-wrapper  {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* グラデーション背景のメインアクションボタン */
+.ai-batch-btn  {
+
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  /* 紫→ピンクのグラデーション */;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(168,85,247,0.35);
+  transition: all 0.2s;
+  white-space: nowrap;
+  flex-shrink: 0;
+
+}
+
+/* ホバー時: 上方向に浮かせて影を強調 */
+.ai-batch-btn:hover  {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 28px rgba(168,85,247,0.5);
+}
+
+.ai-batch-btn:active  {
+  transform: translateY(0);
+}
+
+/* 実行中: 半透明 + カーソル変更で操作不可を表現 */
+.ai-batch-btn.running  {
+  opacity: 0.75;
+  cursor: not-allowed;
+}
+
+.ai-batch-btn:disabled  {
+  transform: none;
+}
+
+/* バッチ実行結果メッセージ（完了 / エラー / タイムアウト）。
+   max-widthで折り返させることで、長いメッセージが横に伸びて隣のボタンの
+   レイアウトを崩さないようにしている */
+.batch-status  {
+
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  max-width: 260px;
+  white-space: normal;
+
+}
+
+.batch-status.success  {
+  color: var(--accent);
+  background: rgba(168,85,247,0.1);
+}
+
+.batch-status.error  {
+  color: var(--danger);
+  background: rgba(224,92,92,0.1);
+}
+
+/* タイムアウト時: 失敗と区別するためオレンジ系（警告色） */
+.batch-status.pending  {
+  color: var(--warn);
+  background: rgba(245,166,35,0.1);
+}
+
+/* ===== SECTION ===== */
+/* セクションタイトル: アイコン + テキストの横並び */
+.section-title  {
+
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+}
+
+.section-icon  {
+  font-size: 18px;
+}
+
+/* TOP3 セクションは下に大きめの余白 */
+.top3-section  {
+  margin-bottom: 40px;
+}
+
+.more-section  {
+  margin-bottom: 20px;
+}
+
+/* ===== GRIDS ===== */
+/* TOP3リスト: TOP3のヒーロー写真が窮屈にならないよう、
+   その他スタジオ一覧(.rec-list)と同じ縦1列・フル幅レイアウトにしている */
+.top3-grid  {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* その他スタジオ・お気に入り: 縦1列リスト */
+.rec-list  {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ===== RECOMMENDATION CARD ===== */
+/* おすすめカード: ホバーで浮き上がりアニメーション */
+.rec-card  {
+
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  cursor: pointer;
+  position: relative;
+  /* ランクバッジの absolute 配置の基準 */;
+  transition: all 0.2s;
+
+}
+
+.rec-card:hover  {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+}
+
+/* TOP3カードのヒーロー写真。card paddingの外側まで四辺ではなく上・左右にだけ
+   はみ出させて上端いっぱいに表示する */
+.rec-card-photo  {
+  display: block;
+  width: calc(100% + 36px);
+  height: 220px;
+  margin: -18px -18px 14px -18px;
+  object-fit: cover;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+/* ランクバッジ: カード左上に絶対配置（#1〜#3） */
+.rank-badge  {
+
+  position: absolute;
+  top: -8px;
+  left: 16px;
+  padding: 2px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+
+}
+
+/* カードヘッダー: スタジオ名・設備 と スコアサークルを左右に配置 */
+.card-header  {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.card-name  {
+  font-size: 17px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+/* 設備タグ一覧 */
+.facility-tags  {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.facility-tag  {
+
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(168,85,247,0.12);
+  color: var(--accent);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 20px;
+
+}
+
+.facility-tag.large  {
+  font-size: 13px;
+  padding: 5px 12px;
+}
+/* 詳細モーダル用 */
+.facility-tag.sm  {
+  font-size: 10px;
+  padding: 2px 6px;
+}
+/* スタジオ一覧用 */
+
+/* スコアサークル: スコアに応じた色のボーダーで囲む円形バッジ */
+.score-circle  {
+
+  width: 60px;
+  height: 60px;
+  flex-shrink: 0;
+  border: 3px solid;
+  /* 色は JS から inline style で指定 */;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+
+}
+
+.score-num  {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.score-label  {
+  font-size: 9px;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+/* AI コメント: 2行で切り捨て（標準 line-clamp + WebKit プレフィックス） */
+.reason-text  {
+
+  font-size: 13px;
+  color: var(--text2);
+  margin-bottom: 12px;
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+}
+
+/* メタ情報: 評価・人気度・距離・費用を横並び */
+.card-meta  {
+
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text2);
+  margin-bottom: 14px;
+
+}
+
+/* カードアクション: ナビ・お気に入りボタンを横並び */
+.card-actions  {
+  display: flex;
+  gap: 8px;
+}
+
+/* ナビ・お気に入りボタン共通スタイル */
+.nav-btn, .fav-btn  {
+
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid;
+  cursor: pointer;
+  transition: all 0.2s;
+
+}
+
+/* ナビボタン: ピンクのアウトラインスタイル */
+.nav-btn  {
+
+  background: transparent;
+  border-color: var(--accent2);
+  color: var(--accent2);
+
+}
+
+.nav-btn:hover  {
+  background: rgba(236,72,153,0.1);
+}
+
+/* お気に入りボタン: 通常はグレー、登録済みは赤 */
+.fav-btn  {
+
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text2);
+
+}
+
+.fav-btn:hover  {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.fav-btn.active  {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: rgba(224,92,92,0.08);
+}
+
+/* ===== MODAL ===== */
+/* バックドロップ: 画面全体を覆う半透明オーバーレイ */
+/* モバイルは画面下部から、PC は中央に表示 */
+.modal-backdrop  {
+
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0,0,0,0.7);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  /* モバイル: 下部表示 */;
+  padding: 20px;
+
+}
+
+@media (min-width: 600px)  {
+
+  /* PC: 中央表示に切り替え */
+  .modal-backdrop  {
+    align-items: center;
+  }
+
+}
+
+/* モーダル本体: 下から滑り上がるアニメーション */
+.modal-panel  {
+
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 20px 20px 20px 20px;
+  width: 100%;
+  max-width: 520px;
+  max-height: 90vh;
+  overflow-y: auto;
+  /* 縦スクロール対応 */;
+  padding: 28px;
+  position: relative;
+  animation: slideUp 0.25s ease;
+
+}
+
+/* 下から上にフェードインするアニメーション */
+@keyframes slideUp  {
+  from  {
+    transform: translateY(40px);
+    opacity: 0;
+  }
+  to  {
+    transform: translateY(0);
+    opacity: 1;
+  }
+
+}
+
+/* 閉じるボタン: 右上に絶対配置 */
+.modal-close  {
+
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text2);
+  transition: color 0.2s;
+
+}
+
+.modal-close:hover  {
+  color: var(--text);
+}
+
+/* ヒーローセクション: スタジオ名とスコアを大きく表示 */
+.modal-hero  {
+  padding-bottom: 20px;
+  margin-bottom: 20px;
+}
+
+.modal-title-text  {
+  font-size: 22px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.modal-score  {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.modal-score-num  {
+  font-size: 40px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.modal-score-label  {
+  font-size: 14px;
+  color: var(--text2);
+}
+
+/* モーダルセクション: AI コメント・設備などのブロック */
+.modal-section  {
+  margin-bottom: 20px;
+}
+
+/* セクションタイトル: 小さめの大文字ラベル */
+.modal-section-title  {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+
+.modal-reason  {
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.modal-facility-tags  {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* スタッツグリッド: 評価・人気度・距離・費用を2列で表示 */
+.modal-stats  {
+
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 24px;
+
+}
+
+/* 各スタット項目: アイコン + ラベル + 値の横並び */
+.stat-item  {
+
+  background: var(--bg3);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+}
+
+.stat-label  {
+  font-size: 12px;
+  color: var(--text2);
+  flex: 1;
+}
+
+.stat-value  {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+/* モーダルアクション: ナビ・お気に入りボタンを横並び */
+.modal-actions  {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.modal-actions .btn-nav  {
+  /* ボタン数が増えても1行に収まりきらない場合は2列で折り返す */
+  flex: 1 1 45%;
+}
+
+/* ナビ・お気に入りボタン共通スタイル */
+.btn-nav, .btn-fav  {
+
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid;
+
+}
+
+/* ナビボタン: ピンクの塗りつぶし */
+.btn-nav  {
+  background: var(--accent2);
+  color: #fff;
+  border-color: var(--accent2);
+}
+
+.btn-nav:hover  {
+  opacity: 0.88;
+}
+
+/* お気に入りボタン: 通常はアウトライン、登録済みは赤 */
+.btn-fav  {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text2);
+}
+
+.btn-fav:hover  {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn-fav.active  {
+  background: rgba(224,92,92,0.1);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ===== MAP PAGE ===== */
+/* 地図ページ: NavBar を除いた残り全高を地図に使用 */
+.map-page  {
+  height: calc(100vh - 80px);
+  display: flex;
+  flex-direction: column;
+}
+
+/* 地図コンテナ: flex で残り高さを全て使用 */
+.map-container  {
+  flex: 1;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+/* InfoWindow 内のスタイル（Google Maps のポップアップ） */
+.map-info  {
+  padding: 8px;
+  min-width: 160px;
+}
+
+.map-info strong  {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 4px;
+  color: #111;
+}
+
+.map-info-score  {
+  font-size: 12px;
+  color: #555;
+}
+
+.map-info-fish  {
+  font-size: 12px;
+  color: #555;
+  margin-bottom: 8px;
+}
+
+/* InfoWindow 内のナビボタン */
+.map-nav-btn  {
+
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  background: #ec4899;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+
+}
+
+/* ===== STUDIOS PAGE ===== */
+/* 検索・設備絞り込みバー */
+.studios-filter-bar  {
+  margin: 14px 0;
+}
+
+.studios-search-row  {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.studios-search-icon  {
+  position: absolute;
+  left: 12px;
+  color: var(--text2);
+  pointer-events: none;
+}
+
+.studios-search-input  {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px 10px 36px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.studios-facility-filter  {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.facility-filter-chip  {
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.facility-filter-chip.active  {
+  background: var(--accent);
+  color: #fff;
+}
+
+.studios-list  {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* スタジオ行: 左側（バー＋名前）と右側（スコア＋ナビ）を両端揃え */
+.studio-row  {
+
+  background: var(--bg2);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border);
+  margin-bottom: 8px;
+
+}
+
+.studio-row-left  {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+/* スコアに応じた色の左端バー（幅4px × 高さ36px） */
+.studio-score-bar  {
+  width: 4px;
+  height: 36px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.studio-row-name  {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.studio-row-facility  {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.studio-row-right  {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.studio-row-score  {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.studio-row-score small  {
+  font-size: 11px;
+  color: var(--text2);
+}
+
+/* ===== EMPTY & LOADING ===== */
+/* ローディングスピナー: 中央揃えで縦積み表示 */
+.loading-state  {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px;
+  gap: 16px;
+  color: var(--text2);
+}
+
+/* スピン回転アニメーション付きのサークルローダー */
+.loader  {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* データ0件のときの空状態メッセージ */
+.empty-state  {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text2);
+}
+
+.empty-hint  {
+  font-size: 13px;
+  margin-top: 8px;
+  opacity: 0.7;
+}
+
+/* API エラー時のエラーバナー */
+.error-banner  {
+  background: rgba(224,92,92,0.12);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  color: var(--danger);
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+/* ===== IMAGE PREVIEW POPOVER ===== */
+/* hover(PC)/長押し(スマホ)でスタジオ写真をプレビュー表示する */
+.image-preview-wrapper  {
+  position: relative;
+  display: inline-block;
+}
+
+.image-preview-popover  {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 6px;
+  width: 140px;
+  height: 140px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  overflow: hidden;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.image-preview-popover img  {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.image-preview-placeholder  {
+  font-size: 32px;
+  color: var(--text2);
+}
+
+/* ===== POSTS ===== */
+.posts-list  {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.post-card  {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.post-image  {
+  width: 100%;
+  max-height: 240px;
+  object-fit: cover;
+  display: block;
+}
+
+.post-body  {
+  padding: 14px 16px;
+}
+
+/* スタジオ名と編集・削除ボタンを両端揃えで配置する行 */
+.post-header-row  {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* 編集・削除ボタンの並び */
+.post-header-actions  {
+  display: flex;
+  gap: 4px;
+}
+
+.post-studio-name  {
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+/* 投稿の★評価表示（塗りつぶし星の並び） */
+.post-rating  {
+  display: flex;
+  gap: 2px;
+  color: var(--warn);
+  margin-bottom: 6px;
+}
+
+.post-content  {
+  font-size: 14px;
+  line-height: 1.6;
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+}
+
+.post-date  {
+  color: var(--text2);
+  font-size: 11px;
+  margin-top: 8px;
+}
+
+/* 編集済みバッジ */
+.post-edited-badge  {
+  margin-left: 4px;
+  font-style: italic;
+}
+
+/* ===== POST FORM ===== */
+.post-form  {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.post-form-label  {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text2);
+}
+
+.post-form-select,
+.post-form-textarea,
+.post-form-input  {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.post-form-file  {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+/* ★評価入力: クリック可能な星ボタン5個の横並び */
+.star-rating-input  {
+  display: flex;
+  gap: 4px;
+}
+
+.star-rating-btn  {
+  background: none;
+  border: none;
+  padding: 2px;
+  color: var(--warn);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: transform 0.15s;
+}
+
+.star-rating-btn:hover  {
+  transform: scale(1.15);
+}
+
+/* ===== CHAT ===== */
+.chat-messages  {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 200px;
+  margin-bottom: 16px;
+}
+
+.chat-bubble  {
+  position: relative;
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* 自分の発言を編集するボタン（吹き出し左上に小さく重ねる） */
+.chat-bubble-edit  {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--text2);
+  cursor: pointer;
+}
+
+.chat-bubble-edit:hover  {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.chat-bubble.user  {
+  align-self: flex-end;
+  background: var(--accent2);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.chat-bubble.assistant  {
+  align-self: flex-start;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+}
+
+.chat-bubble-loading  {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text2);
+}
+
+.chat-bubble-image  {
+  display: block;
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+}
+
+.chat-bubble-text  {
+  white-space: pre-wrap;
+}
+
+/* 画面スクロールに追従して常に下部に表示される入力欄 */
+.chat-input-bar  {
+  position: sticky;
+  bottom: 0;
+  background: var(--bg);
+  padding: 10px 0 4px;
+  border-top: 1px solid var(--border);
+}
+
+.chat-input-row  {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-text-input  {
+  flex: 1;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.chat-send-btn  {
+  background: var(--accent2);
+  border-color: var(--accent2);
+  color: #fff;
+}
+
+.chat-image-preview  {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  margin-bottom: 8px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.chat-image-preview img  {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.chat-image-remove  {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: rgba(0,0,0,0.6);
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  cursor: pointer;
+}
+
+/* メッセージ編集中の表示（入力欄の上に出す小さなバナー） */
+.chat-editing-banner  {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(236,72,153,0.1);
+  color: var(--accent2);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+}
+
+.chat-editing-cancel  {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.chat-history-list  {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-history-item  {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}
+
+.chat-history-item:hover  {
+  border-color: var(--accent2);
+}
+
+.chat-history-title  {
+  flex: 1;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-history-date  {
+  font-size: 11px;
+  color: var(--text2);
+  flex-shrink: 0;
+}
+
+/* ===== GUIDE ===== */
+.guide-section  {
+  padding: 24px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.guide-section-head  {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.guide-num  {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text2);
+  letter-spacing: 0.04em;
+}
+
+.guide-heading  {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.guide-desc  {
+  color: var(--text2);
+  font-size: 13.5px;
+  margin: 6px 0 16px;
+  max-width: 60ch;
+}
+
+.guide-feature-list  {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.guide-feature  {
+  display: flex;
+  gap: 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+}
+
+.guide-feature-mark  {
+  flex: 0 0 auto;
+  width: 4px;
+  border-radius: 4px;
+  background: var(--accent);
+  opacity: 0.6;
+}
+
+.guide-feature b  {
+  display: block;
+  font-size: 13.5px;
+  margin-bottom: 3px;
+}
+
+.guide-feature span  {
+  font-size: 12.5px;
+  color: var(--text2);
+  line-height: 1.6;
+}
+
+.guide-install-grid  {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.guide-install-card  {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+}
+
+.guide-install-card h3  {
+  font-size: 13px;
+  color: var(--accent);
+  margin: 0 0 8px;
+}
+
+.guide-install-card ol  {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  color: var(--text2);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.guide-faq-item  {
+  border-bottom: 1px solid var(--border);
+  padding: 14px 0;
+}
+.guide-faq-item:last-child  {
+  border-bottom: none;
+}
+
+.guide-faq-q  {
+  font-weight: 700;
+  font-size: 13.5px;
+  margin: 0 0 6px;
+}
+
+.guide-faq-a  {
+  font-size: 12.5px;
+  color: var(--text2);
+  margin: 0;
+  line-height: 1.7;
+}
+
+/* ===== UTILITIES ===== */
+/* アイコンボタン: ナビ・更新など汎用の正方形ボタン */
+.icon-btn  {
+
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text2);
+  transition: all 0.2s;
+
+}
+
+.icon-btn:hover  {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* spin クラス: ローディング中の要素に付与して回転させる */
+.spin  {
+  animation: spin 1s linear infinite;
+}
+
+/* 360度回転アニメーション */
+@keyframes spin  {
+  to  {
+    transform: rotate(360deg);
+  }
+
+}
+
+/* ===== RESPONSIVE ===== */
+/* モバイル（640px 以下）向け調整 */
+@media (max-width: 640px)  {
+
+  /* padding-top を NavBar 高さ（74px）に縮小 */
+  .main-content  {
+    padding: 12px;
+    padding-top: 74px;
+  }
+
+  /* NavBar のアプリ名を非表示にしてアイコンのみ表示 */
+  .nav-title  {
+    display: none;
+  }
+
+  /* NavBar の各リンクもラベル文字を非表示にしてアイコンのみ表示 */
+  .nav-link span  {
+    display: none;
+  }
+
+  /* ラベルが無くなる分、アイコンだけのボタンとして扱いやすいようパディングを調整 */
+  .nav-link  {
+    padding: 8px 8px;
+  }
+
+  .navbar  {
+    padding: 0 10px;
+  }
+
+  /* ロゴ・ログイン状態は常に見える位置を確保し、リンク数が多くて幅が足りない場合は
+     中央のリンク一覧だけを横スクロールさせる */
+  .nav-brand,
+  .nav-auth  {
+    flex-shrink: 0;
+  }
+
+  .nav-links  {
+    overflow-x: auto;
+    min-width: 0;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .nav-links::-webkit-scrollbar  {
+    display: none;
+  }
+
+  /* AI分析・新スタジオ探索の2ボタン。
+     デスクトップ幅のまま横並びで折り返すと窮屈だったため、モバイルでは
+     縦積み・フル幅にして本文以外の余白を減らし、影も少し抑えて馴染ませる */
+  .ai-batch-section  {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .ai-batch-wrapper  {
+    width: 100%;
+  }
+
+  .ai-batch-btn  {
+    width: 100%;
+    justify-content: center;
+    padding: 11px 16px;
+    font-size: 14px;
+    box-shadow: 0 2px 10px rgba(168,85,247,0.3);
+  }
+
+  .ai-batch-btn:hover  {
+    box-shadow: 0 3px 14px rgba(168,85,247,0.4);
+  }
+
+  .batch-status  {
+    max-width: 100%;
+  }
+
+  /* 狭い画面ではメールアドレス・ログインラベルも隠してアイコンのみにする */
+  .nav-auth-email,
+  .nav-auth-label  {
+    display: none;
+  }
+
+  .nav-auth .icon-btn  {
+    width: 36px;
+    padding: 0;
+  }
+
+  /* モーダルのパディングを縮小 */
+  .modal-panel  {
+    padding: 20px;
+  }
+
+  /* スタッツグリッドは2列を維持 */
+  .modal-stats  {
+    grid-template-columns: 1fr 1fr;
+  }
+
+}

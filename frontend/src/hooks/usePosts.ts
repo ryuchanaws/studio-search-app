@@ -1,0 +1,96 @@
+/**
+ * レビュー投稿の状態管理カスタムフック。
+ *
+ * 投稿一覧の取得・新規投稿の作成・削除を提供する。
+ * useFavorites.ts と同じ useState + useCallback + 楽観的更新のパターンを踏襲する。
+ *
+ * @module usePosts
+ */
+import { useState, useEffect, useCallback } from "react";
+import type { Post } from "../types";
+import { getPosts, createPost, updatePost as updatePostApi, deletePost as deletePostApi } from "../api/client";
+
+/**
+ * レビュー投稿を管理するカスタムフック。
+ *
+ * @returns {object} 投稿管理に必要な状態と操作関数
+ * @returns {Post[]}    posts       - 投稿一覧（新しい順）
+ * @returns {boolean}   loading     - データ取得中フラグ
+ * @returns {string | null} error   - 一覧取得のエラーメッセージ
+ * @returns {string | null} deleteError - 削除失敗時のエラーメッセージ
+ * @returns {Function}  submitPost  - 新規投稿を作成する関数
+ * @returns {Function}  editPost    - 投稿を編集する関数
+ * @returns {Function}  removePost  - 投稿を削除する関数
+ * @returns {Function}  refetch     - 投稿一覧を再取得する関数
+ */
+export const usePosts = () => {
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const fetchPosts = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await getPosts();
+      setPosts(data);
+    } catch {
+      setError("投稿の取得に失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  /**
+   * 新規投稿を作成し、成功したら一覧の先頭に楽観的に追加する。
+   *
+   * @param {object} input - 投稿内容（studioId・content必須、imageUrl・rating省略可）
+   * @returns {Promise<void>}
+   */
+  const submitPost = useCallback(
+    async (input: { studioId: string; content: string; imageUrl?: string; rating?: number }) => {
+      const created = await createPost(input);
+      setPosts((prev) => [created, ...prev]);
+    },
+    []
+  );
+
+  /**
+   * 投稿を編集し、成功したら一覧内の該当投稿を更新後の内容に差し替える。
+   * 失敗時はそのままthrowする（呼び出し元のPostFormが自身のインラインエラー表示でキャッチする）。
+   *
+   * @param {string} postId - 編集対象の投稿ID
+   * @param {object} input - 更新するフィールドのみ（content・imageUrl・rating、いずれも省略可）
+   * @returns {Promise<void>}
+   */
+  const editPost = useCallback(
+    async (postId: string, input: { content?: string; imageUrl?: string; rating?: number }) => {
+      const updated = await updatePostApi(postId, input);
+      setPosts((prev) => prev.map((p) => (p.postId === postId ? updated : p)));
+    },
+    []
+  );
+
+  /**
+   * 投稿を削除し、成功したら一覧からも取り除く。
+   *
+   * @param {string} postId - 削除対象の投稿ID
+   * @returns {Promise<void>}
+   */
+  const removePost = useCallback(async (postId: string) => {
+    try {
+      setDeleteError(null);
+      await deletePostApi(postId);
+      setPosts((prev) => prev.filter((p) => p.postId !== postId));
+    } catch {
+      setDeleteError("投稿の削除に失敗しました");
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPosts();
+  }, [fetchPosts]);
+
+  return { posts, loading, error, deleteError, submitPost, editPost, removePost, refetch: fetchPosts };
+};

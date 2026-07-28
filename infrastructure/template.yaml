@@ -1,0 +1,699 @@
+# ==============================================================
+# template.yaml
+#
+# レンタルスタジオサーチアプリ — AWS SAM テンプレート
+# CloudFormation スタック名: studio-search-app
+# （釣行AIアプリ fishing-ai-app と同じAWSアカウント内に、完全に独立したスタックとして構築）
+#
+# 構成リソース:
+#   - DynamoDB テーブル x7（Studios / Recommendations / Favorites / Posts / Chats / Usage / Users）
+#   - Lambda 関数 x16（API系 x14 / バッチ系 x2 本体 + admin_trigger x2）
+#   - API Gateway（明示的なAWS::Serverless::Apiリソース。Cognitoオーソライザーで一部エンドポイントを保護）
+#   - Cognito User Pool + Google IdP（Hosted UI経由のGoogle認証）
+#   - EventBridge スケジュール（毎日 AM6:00 JST）
+#   - AWS Budgets（月次利用料アラート）
+#
+# デプロイ:
+#   sam build -t infrastructure/template.yaml
+#   sam deploy --stack-name studio-search-app --capabilities CAPABILITY_IAM
+# ==============================================================
+
+AWSTemplateFormatVersion: "2010-09-09"
+
+Transform: AWS::Serverless-2016-10-31
+
+Description: Studio Search App - Serverless Backend
+
+# ==============================================================
+# グローバル設定
+# ==============================================================
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 60
+    MemorySize: 256
+    Environment:
+      Variables:
+        STUDIOS_TABLE: !Ref StudiosTable
+        RECOMMENDATIONS_TABLE: !Ref RecommendationsTable
+        FAVORITES_TABLE: !Ref FavoritesTable
+        POSTS_TABLE: !Ref PostsTable
+        CHATS_TABLE: !Ref ChatsTable
+        USAGE_TABLE: !Ref UsageTable
+        USERS_TABLE: !Ref UsersTable
+        UPLOADS_BUCKET: !Ref UploadsBucket
+
+Resources:
+
+  # ==============================================================
+  # 認証基盤（Cognito User Pool + Google IdP、Hosted UI経由のGoogle認証）
+  # ==============================================================
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: studio-search-app-users
+      AutoVerifiedAttributes: [email]
+      UsernameAttributes: [email]
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref UserPool
+      Domain: !Sub "studio-search-app-${AWS::AccountId}"
+
+  # Googleを外部IdPとして連携。client_id/secretはSSMに事前登録したものをデプロイ時に動的解決する。
+  # client_secretは{{resolve:ssm-secure:...}}が使えないリソースのため、通常のString（非暗号化）
+  # パラメータとして登録し {{resolve:ssm:...}} で解決する（釣行AIアプリと同じ注意点）。
+  UserPoolGoogleIdP:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Properties:
+      UserPoolId: !Ref UserPool
+      ProviderName: Google
+      ProviderType: Google
+      ProviderDetails:
+        client_id: "{{resolve:ssm:/studio-search/google-oauth-client-id}}"
+        client_secret: "{{resolve:ssm:/studio-search/google-oauth-client-secret}}"
+        authorize_scopes: "email openid profile"
+      AttributeMapping:
+        email: email
+        username: sub
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    DependsOn: UserPoolGoogleIdP
+    Properties:
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      SupportedIdentityProviders: [Google]
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [email, openid, profile]
+      AllowedOAuthFlowsUserPoolClient: true
+      # TODO: フロントエンドのCloudFront/Cloudflare配信URLが決まったらここに追加すること
+      CallbackURLs:
+        - http://localhost:5173/
+      LogoutURLs:
+        - http://localhost:5173/
+
+  # ==============================================================
+  # API Gateway
+  # ==============================================================
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors:
+        AllowMethods: "'GET,POST,DELETE,PUT,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowOrigin: "'*'"
+      Auth:
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt UserPool.Arn
+
+  # ==============================================================
+  # DynamoDB テーブル定義
+  # ==============================================================
+
+  StudiosTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: studio-studios
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: studioId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: studioId, KeyType: HASH }
+
+  RecommendationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: studio-recommendations
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: studioId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: studioId, KeyType: HASH }
+
+  FavoritesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: studio-favorites
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: userId, AttributeType: S }
+        - { AttributeName: studioId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: userId, KeyType: HASH }
+        - { AttributeName: studioId, KeyType: RANGE }
+
+  PostsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: studio-posts
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: postId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: postId, KeyType: HASH }
+
+  ChatsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: studio-chats
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: userId, AttributeType: S }
+        - { AttributeName: chatId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: userId, KeyType: HASH }
+        - { AttributeName: chatId, KeyType: RANGE }
+
+  UsageTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: studio-usage
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: userId, AttributeType: S }
+        - { AttributeName: dateKey, AttributeType: S }
+      KeySchema:
+        - { AttributeName: userId, KeyType: HASH }
+        - { AttributeName: dateKey, KeyType: RANGE }
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: studio-users
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: userId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: userId, KeyType: HASH }
+
+  # ==============================================================
+  # S3 バケット（スタジオ写真・投稿写真のアップロード先）
+  # ==============================================================
+  UploadsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "studio-search-app-uploads-${AWS::AccountId}"
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins: ["*"]
+            AllowedMethods: [GET, PUT, POST]
+            AllowedHeaders: ["*"]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
+
+  UploadsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref UploadsBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub "${UploadsBucket.Arn}/*"
+
+  # ==============================================================
+  # Lambda 関数定義（API系）
+  # ==============================================================
+
+  GetRecommendationsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: getRecommendationsHandler
+      Handler: handlers.getRecommendationsHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref RecommendationsTable }
+        - DynamoDBReadPolicy: { TableName: !Ref StudiosTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /recommendations
+            Method: GET
+
+  GetStudiosFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: getStudiosHandler
+      Handler: handlers.getStudiosHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref StudiosTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /studios
+            Method: GET
+
+  GetPostsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: getPostsHandler
+      Handler: handlers.getPostsHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref PostsTable }
+        - DynamoDBReadPolicy: { TableName: !Ref UsersTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /posts
+            Method: GET
+
+  GetFavoritesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: getFavoritesHandler
+      Handler: handlers.getFavoritesHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref FavoritesTable }
+        - DynamoDBReadPolicy: { TableName: !Ref StudiosTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /favorites
+            Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  CreateFavoriteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: createFavoriteHandler
+      Handler: handlers.postFavoritesHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref FavoritesTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /favorites
+            Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  DeleteFavoriteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: deleteFavoriteHandler
+      Handler: handlers.deleteFavoritesHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref FavoritesTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /favorites/{studioId}
+            Method: DELETE
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  CreatePostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: createPostHandler
+      Handler: handlers.postPostsHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref PostsTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /posts
+            Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  DeletePostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: deletePostHandler
+      Handler: handlers.deletePostHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref PostsTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /posts/{postId}
+            Method: DELETE
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  UpdatePostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: updatePostHandler
+      Handler: handlers.putPostHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref PostsTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /posts/{postId}
+            Method: PUT
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  UpdateStudioImageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: updateStudioImageHandler
+      Handler: handlers.putStudioImageHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref StudiosTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /studios/{studioId}/image
+            Method: PUT
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  PresignUploadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: presignUploadHandler
+      Handler: handlers.postPresignUploadHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - S3WritePolicy: { BucketName: !Ref UploadsBucket }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /uploads/presign
+            Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # POST /chat — 写真添付時はClaudeへマルチモーダル入力として渡すため、S3読み取り権限も付与
+  # Timeoutは API Gateway の29秒上限より短く設定し、超過時もLambda側が先にエラーを返せるようにする
+  PostChatFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: postChatHandler
+      Handler: handlers.postChatHandler
+      CodeUri: ../backend/lambda/api/
+      Timeout: 25
+      Policies:
+        - SSMParameterReadPolicy:
+            ParameterName: studio-search/anthropic-api-key
+        - S3ReadPolicy: { BucketName: !Ref UploadsBucket }
+        - DynamoDBCrudPolicy: { TableName: !Ref ChatsTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref UsageTable }
+        - DynamoDBReadPolicy: { TableName: !Ref StudiosTable }
+        - DynamoDBReadPolicy: { TableName: !Ref RecommendationsTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /chat
+            Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  GetChatsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: getChatsHandler
+      Handler: handlers.getChatsHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref ChatsTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /chats
+            Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  GetChatFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: getChatHandler
+      Handler: handlers.getChatHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref ChatsTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /chats/{chatId}
+            Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  DeleteChatFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: deleteChatHandler
+      Handler: handlers.deleteChatHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref ChatsTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /chats/{chatId}
+            Method: DELETE
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  GetMyProfileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: getMyProfileHandler
+      Handler: handlers.getMyProfileHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref UsersTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /me
+            Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  PutMyProfileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: putMyProfileHandler
+      Handler: handlers.putMyProfileHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref UsersTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /me
+            Method: PUT
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # ==============================================================
+  # Lambda 関数定義（バッチ系）
+  # ==============================================================
+
+  # 全スタジオのスコア計算 + Claude API による推薦理由生成バッチ
+  # discover_studios.run_discovery もこの中で実行するため（「AI分析を実行」が新スタジオ探索も兼ねる）、
+  # StudiosTableへの書き込み権限とPlaces APIキーの読み取り権限を追加している
+  GenerateStudioScoreBatch:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: generateStudioScoreBatch
+      Handler: generate_studio_score.handler
+      CodeUri: ../backend/lambda/batch/
+      Timeout: 420
+      MemorySize: 512
+      Policies:
+        - SSMParameterReadPolicy:
+            # SAM の SSMParameterReadPolicy は内部で "parameter/${ParameterName}" として
+            # ARN を組み立てるため、先頭にスラッシュを付けると二重スラッシュのARNになり
+            # 実際のパラメータと一致しなくなる（AccessDeniedの原因）。そのため付けない。
+            ParameterName: studio-search/anthropic-api-key
+        - SSMParameterReadPolicy:
+            ParameterName: studio-search/google-places-api-key
+        - DynamoDBCrudPolicy:
+            TableName: !Ref StudiosTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RecommendationsTable
+        - S3WritePolicy: { BucketName: !Ref UploadsBucket }
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 21 * * ? *)
+            Enabled: true
+
+  # POST /admin/run-ai-batch — フロントの「AI実行ボタン」から手動でバッチを起動する
+  AdminRunAiBatchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: adminRunAiBatch
+      Handler: admin_trigger.handler
+      CodeUri: ../backend/lambda/batch/
+      Timeout: 330
+      Environment:
+        Variables:
+          BATCH_FUNCTION_NAME: !Ref GenerateStudioScoreBatch
+          RATE_LIMIT_ACTION: ai-batch
+          RATE_LIMIT_DAILY: "3"
+      Policies:
+        - LambdaInvokePolicy: { FunctionName: !Ref GenerateStudioScoreBatch }
+        - DynamoDBCrudPolicy: { TableName: !Ref UsageTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /admin/run-ai-batch
+            Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # 新規レンタルスタジオ候補を Google Places API で探索し、Studios テーブルに追加するバッチ
+  # POST /admin/run-studio-discovery（フロントの「現在地から探す」ボタン）専用として、
+  # ユーザーの現在地(lat/lng)を指定した近傍探索のためだけに呼び出される
+  DiscoverStudiosBatch:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: discoverStudiosBatch
+      Handler: discover_studios.handler
+      CodeUri: ../backend/lambda/batch/
+      Timeout: 120
+      MemorySize: 256
+      Policies:
+        - SSMParameterReadPolicy:
+            ParameterName: studio-search/google-places-api-key
+        - SSMParameterReadPolicy:
+            ParameterName: studio-search/anthropic-api-key
+        - DynamoDBCrudPolicy:
+            TableName: !Ref StudiosTable
+        - S3WritePolicy: { BucketName: !Ref UploadsBucket }
+
+  # POST /admin/run-studio-discovery — フロントの「現在地から探す」ボタンから
+  # DiscoverStudiosBatch を起動する（リクエストボディの lat/lng をそのまま転送する）
+  AdminRunStudioDiscoveryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: adminRunStudioDiscovery
+      Handler: admin_trigger.handler
+      CodeUri: ../backend/lambda/batch/
+      Environment:
+        Variables:
+          BATCH_FUNCTION_NAME: !Ref DiscoverStudiosBatch
+          RATE_LIMIT_ACTION: studio-discovery
+          RATE_LIMIT_DAILY: "10"
+      Policies:
+        - LambdaInvokePolicy: { FunctionName: !Ref DiscoverStudiosBatch }
+        - DynamoDBCrudPolicy: { TableName: !Ref UsageTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /admin/run-studio-discovery
+            Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # ==============================================================
+  # AWS利用料アラート（月$10、80%/100%到達時にメール通知）
+  # Places等のGoogle Cloud側課金・Anthropic課金はAWS Budgetsでは検知できないため対象外
+  # ==============================================================
+  CostBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: studio-search-app-monthly
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: "10"
+          Unit: USD
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: rfunao0955@gmail.com
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: rfunao0955@gmail.com
+
+# ==============================================================
+# スタック出力
+# ==============================================================
+Outputs:
+  ApiEndpoint:
+    Description: "API Gateway のエンドポイント URL（VITE_API_BASE_URL に設定すること）"
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+  UploadsBucketName:
+    Description: "スタジオ写真・投稿写真のアップロード先S3バケット名"
+    Value: !Ref UploadsBucket
+  UserPoolId:
+    Description: "Cognito User Pool ID（フロントエンドの src/auth/authConfig.ts に設定すること）"
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Description: "Cognito User Pool Client ID（フロントエンドの src/auth/authConfig.ts に設定すること）"
+    Value: !Ref UserPoolClient
+  CognitoHostedUiDomain:
+    Description: "Cognito Hosted UIのドメイン。Google Cloud ConsoleのOAuthクライアントで承認済みリダイレクトURIに <この値>/oauth2/idpresponse を登録すること"
+    Value: !Sub "https://studio-search-app-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"

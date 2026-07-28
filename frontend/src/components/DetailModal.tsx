@@ -1,0 +1,186 @@
+/**
+ * @fileoverview スタジオ詳細モーダルコンポーネント。
+ *
+ * おすすめカードをタップしたときに表示されるモーダル。
+ * AI コメント・設備・各種スコア・距離・費用を表示し、
+ * Google Maps ナビとお気に入りトグルボタンを提供する。
+ */
+
+import { useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { X, Navigation2, Heart, Sparkles, Star, TrendingUp, MapPin, Banknote, Camera, MessageSquare } from "lucide-react";
+import type { Recommendation } from "../types";
+import { getScoreColor, getScoreLabel } from "../utils/score";
+import { getPresignedUploadUrl, uploadImageToS3, updateStudioImage } from "../api/client";
+import { ImagePreviewPopover } from "./ImagePreviewPopover";
+
+/**
+ * DetailModal コンポーネントの Props。
+ */
+interface DetailModalProps {
+  /** 詳細表示するおすすめデータ */
+  recommendation: Recommendation;
+  /** 現在のお気に入り登録状態 */
+  isFavorite: boolean;
+  /** モーダルを閉じる関数 */
+  onClose: () => void;
+  /** お気に入りトグル関数 */
+  onToggleFavorite: (studioId: string) => void;
+}
+
+/**
+ * スタジオ詳細モーダルコンポーネント。
+ *
+ * - バックドロップ（背景）クリックでモーダルを閉じる
+ * - スコアに応じた色でヒーローセクションのボーダーを表示する
+ * - お気に入りボタンは登録済みかどうかで表示を切り替える
+ *
+ * @param {DetailModalProps} props
+ * @returns {JSX.Element} スタジオ詳細モーダル
+ */
+export const DetailModal = ({ recommendation: rec, isFavorite, onClose, onToggleFavorite }: DetailModalProps) => {
+  /** スコアに応じたアクセントカラー */
+  const scoreColor = getScoreColor(rec.score);
+
+  /** アップロード済みのスタジオ写真URL（アップロード直後の即時反映用にローカルで保持） */
+  const [imageUrl, setImageUrl] = useState(rec.studio?.imageUrl);
+  /** アップロード中フラグ */
+  const [uploading, setUploading] = useState(false);
+  /** アップロード失敗時のエラーメッセージ（サイズ超過など） */
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * Google Maps のルート案内を新しいタブで開く。
+   */
+  const openNav = () => {
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${rec.studio?.lat ?? 0},${rec.studio?.lng ?? 0}`;
+    window.open(url, "_blank");
+  };
+
+  /**
+   * 選択された画像ファイルをS3へアップロードし、スタジオの写真として設定する。
+   * 署名付きフォーム発行 → S3へ直接POST → Studiosテーブルのimageurlを更新、の順に行う。
+   *
+   * @param {React.ChangeEvent<HTMLInputElement>} e - ファイル選択イベント
+   */
+  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const { uploadUrl, uploadFields, publicUrl } = await getPresignedUploadUrl(file.type);
+      await uploadImageToS3(uploadUrl, uploadFields, file);
+      await updateStudioImage(rec.studioId, publicUrl);
+      setImageUrl(publicUrl);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "アップロードに失敗しました");
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose} aria-label="閉じる">
+          <X size={20} />
+        </button>
+
+        {/* ヒーローセクション: スタジオ名とスコアを大きく表示 */}
+        <div className="modal-hero" style={{ borderBottom: `3px solid ${scoreColor}` }}>
+          <ImagePreviewPopover imageUrl={imageUrl}>
+            <h2 className="modal-title-text">{rec.studio?.name ?? rec.studioId}</h2>
+          </ImagePreviewPopover>
+          <div className="modal-score" style={{ color: scoreColor }}>
+            <span className="modal-score-num">{Math.round(rec.score)}</span>
+            <span className="modal-score-label">/ 100 — {getScoreLabel(rec.score)}</span>
+          </div>
+        </div>
+
+        {/* AI コメントセクション: Claude API が生成した推薦理由 */}
+        <div className="modal-section">
+          <h3 className="modal-section-title">🤖 AI分析コメント</h3>
+          <p className="modal-reason">{rec.reason}</p>
+        </div>
+
+        {/* 設備セクション */}
+        <div className="modal-section">
+          <h3 className="modal-section-title">設備</h3>
+          <div className="modal-facility-tags">
+            {rec.facilityTags.map((f) => (
+              <span key={f} className="facility-tag large">
+                <Sparkles size={14} />
+                {f}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* 詳細スタッツグリッド: 評価・人気度・距離・費用 */}
+        <div className="modal-stats">
+          <div className="stat-item">
+            <Star size={18} />
+            <span className="stat-label">評価スコア</span>
+            <span className="stat-value">{Math.round(rec.ratingScore ?? 0)}</span>
+          </div>
+          <div className="stat-item">
+            <TrendingUp size={18} />
+            <span className="stat-label">人気度スコア</span>
+            <span className="stat-value">{Math.round(rec.popularityScore ?? 0)}</span>
+          </div>
+          <div className="stat-item">
+            <MapPin size={18} />
+            <span className="stat-label">距離</span>
+            <span className="stat-value">{rec.distance != null ? rec.distance.toFixed(1) : "0.0"}km</span>
+          </div>
+          <div className="stat-item">
+            <Banknote size={18} />
+            <span className="stat-label">費用</span>
+            <span className="stat-value">{!rec.cost || rec.cost === 0 ? "問合せ" : `¥${rec.cost.toLocaleString()}`}</span>
+          </div>
+        </div>
+
+        {/* アクションボタン: ナビ・お気に入り */}
+        <div className="modal-actions">
+          <button className="btn-nav" onClick={openNav}>
+            <Navigation2 size={16} />
+            Google Mapsでナビ
+          </button>
+
+          <button
+            className={`btn-fav ${isFavorite ? "active" : ""}`}
+            onClick={() => onToggleFavorite(rec.studioId)}
+          >
+            <Heart size={16} fill={isFavorite ? "currentColor" : "none"} />
+            {isFavorite ? "保存済み" : "お気に入りに追加"}
+          </button>
+
+          {/* スタジオ写真の設定: 選択したファイルをS3へアップロードしてスタジオに紐付ける */}
+          <button className="btn-nav" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+            <Camera size={16} />
+            {uploading ? "アップロード中..." : imageUrl ? "写真を変更" : "スタジオ写真を設定"}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            style={{ display: "none" }}
+            onChange={handlePhotoSelect}
+          />
+
+          {/* このスタジオのレビュー一覧へ */}
+          <Link to={`/posts?studioId=${rec.studioId}`} className="btn-nav">
+            <MessageSquare size={16} />
+            このスタジオのレビューを見る
+          </Link>
+        </div>
+
+        {uploadError && <div className="error-banner">{uploadError}</div>}
+      </div>
+    </div>
+  );
+};
