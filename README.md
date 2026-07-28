@@ -70,6 +70,8 @@ GitHub Actions のワークフローから AWS や外部サービスに安全に
 | `VITE_COGNITO_USER_POOL_ID` | Cognito User Pool ID | `sam deploy` 後の Outputs（`UserPoolId`） |
 | `VITE_COGNITO_CLIENT_ID` | Cognito User Pool Client ID | `sam deploy` 後の Outputs（`UserPoolClientId`） |
 | `VITE_COGNITO_DOMAIN` | Cognito Hosted UI のドメイン | `sam deploy` 後の Outputs（`CognitoHostedUiDomain`）。詳細は下記「9. 認証（Cognito + Google）のセットアップ」参照 |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare Workers へのデプロイ権限を持つ API トークン | Cloudflareダッシュボード → プロフィール → API Tokens →「Edit Cloudflare Workers」テンプレート |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare アカウントID | Cloudflareダッシュボード（トークン発行時にも表示される） |
 
 > **補足:** スタジオ写真・投稿写真のアップロード先S3バケット（`studio-search-app-uploads-<アカウントID>`）は
 > ここでは扱わない。こちらは `template.yaml` の `UploadsBucket` としてSAM/CloudFormationで自動作成されるため、
@@ -213,11 +215,18 @@ git push origin main
 
 ## 7. デプロイ先
 
+フロントエンドは釣行AIアプリと同じく2系統に並行デプロイする。バックエンド（API Gateway/Lambda/DynamoDB）はAWS側1本のみ。
+
 | デプロイ先 | URL | デプロイ方法 |
 |---|---|---|
 | AWS（CloudFront） | （デプロイ後にここへ記載） | `main` ブランチへの push で GitHub Actions が自動デプロイ |
+| Cloudflare Workers | （デプロイ後にここへ記載） | `main` ブランチへの push で GitHub Actions（`deploy-frontend` ジョブ内の `Deploy to Cloudflare Workers` ステップ）が同じビルド成果物を `npx wrangler deploy` する |
 
-> 釣行AIアプリと異なり、Cloudflare Workersへの並行デプロイは行っていない（v1では単一デプロイ先で開始）。
+> Cloudflare側のWorker名は `frontend/wrangler.jsonc` の `name: "studio-search-app"` で指定しており、
+> 釣行AIアプリの Worker（`ryu-chan-fish`）とは別物。GitHub Secrets もリポジトリごとに別登録のため、
+> 誤ってどちらかのアプリのビルドがもう片方のWorkerに上書きされることは無い。
+> Cloudflare側の自動デプロイには GitHub Secrets `CLOUDFLARE_API_TOKEN`・`CLOUDFLARE_ACCOUNT_ID` の登録が必要
+> （釣行AIアプリと同じCloudflareアカウントを使い回してよいが、Secrets自体はこのリポジトリに別途登録する必要がある）。
 
 ---
 

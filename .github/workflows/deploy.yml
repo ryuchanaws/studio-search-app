@@ -144,3 +144,15 @@ jobs:
           aws cloudfront create-invalidation \
             --distribution-id ${{ env.CLOUDFRONT_ID }} \
             --paths "/*"
+
+      # Cloudflare Workers（wrangler.jsonc の name: "studio-search-app"）にも
+      # 同じビルド成果物をデプロイする。釣行AIアプリ（ryu-chan-fish）とは
+      # 別Workerなので、このリポジトリのSecretsを誤って設定しても
+      # 釣行AIアプリ側のWorkerに影響することは無い。
+      # CLOUDFLARE_ACCOUNT_ID はアカウントが複数ある場合に対象を一意にするため設定。
+      - name: Deploy to Cloudflare Workers
+        run: npx wrangler deploy
+        working-directory: frontend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
