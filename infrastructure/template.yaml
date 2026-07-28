@@ -89,11 +89,14 @@ Resources:
       AllowedOAuthFlows: [code]
       AllowedOAuthScopes: [email, openid, profile]
       AllowedOAuthFlowsUserPoolClient: true
-      # TODO: フロントエンドのCloudFront/Cloudflare配信URLが決まったらここに追加すること
       CallbackURLs:
         - http://localhost:5173/
+        - https://d1c03ygthitldo.cloudfront.net/
+        - https://studio-search-app.ryuchan-aws.workers.dev/
       LogoutURLs:
         - http://localhost:5173/
+        - https://d1c03ygthitldo.cloudfront.net/
+        - https://studio-search-app.ryuchan-aws.workers.dev/
 
   # ==============================================================
   # API Gateway
@@ -230,7 +233,6 @@ Resources:
   GetRecommendationsFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: getRecommendationsHandler
       Handler: handlers.getRecommendationsHandler
       CodeUri: ../backend/lambda/api/
       Policies:
@@ -247,7 +249,6 @@ Resources:
   GetStudiosFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: getStudiosHandler
       Handler: handlers.getStudiosHandler
       CodeUri: ../backend/lambda/api/
       Policies:
@@ -263,7 +264,6 @@ Resources:
   GetPostsFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: getPostsHandler
       Handler: handlers.getPostsHandler
       CodeUri: ../backend/lambda/api/
       Policies:
@@ -280,7 +280,6 @@ Resources:
   GetFavoritesFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: getFavoritesHandler
       Handler: handlers.getFavoritesHandler
       CodeUri: ../backend/lambda/api/
       Policies:
@@ -299,7 +298,6 @@ Resources:
   CreateFavoriteFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: createFavoriteHandler
       Handler: handlers.postFavoritesHandler
       CodeUri: ../backend/lambda/api/
       Policies:
@@ -317,7 +315,6 @@ Resources:
   DeleteFavoriteFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: deleteFavoriteHandler
       Handler: handlers.deleteFavoritesHandler
       CodeUri: ../backend/lambda/api/
       Policies:
@@ -335,7 +332,6 @@ Resources:
   CreatePostFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: createPostHandler
       Handler: handlers.postPostsHandler
       CodeUri: ../backend/lambda/api/
       Policies:
@@ -353,7 +349,6 @@ Resources:
   DeletePostFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: deletePostHandler
       Handler: handlers.deletePostHandler
       CodeUri: ../backend/lambda/api/
       Policies:
@@ -371,7 +366,6 @@ Resources:
   UpdatePostFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: updatePostHandler
       Handler: handlers.putPostHandler
       CodeUri: ../backend/lambda/api/
       Policies:
@@ -389,7 +383,6 @@ Resources:
   UpdateStudioImageFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: updateStudioImageHandler
       Handler: handlers.putStudioImageHandler
       CodeUri: ../backend/lambda/api/
       Policies:
@@ -407,7 +400,6 @@ Resources:
   PresignUploadFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: presignUploadHandler
       Handler: handlers.postPresignUploadHandler
       CodeUri: ../backend/lambda/api/
       Policies:
@@ -427,7 +419,6 @@ Resources:
   PostChatFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: postChatHandler
       Handler: handlers.postChatHandler
       CodeUri: ../backend/lambda/api/
       Timeout: 25
@@ -452,7 +443,6 @@ Resources:
   GetChatsFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: getChatsHandler
       Handler: handlers.getChatsHandler
       CodeUri: ../backend/lambda/api/
       Policies:
@@ -470,7 +460,6 @@ Resources:
   GetChatFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: getChatHandler
       Handler: handlers.getChatHandler
       CodeUri: ../backend/lambda/api/
       Policies:
@@ -488,7 +477,6 @@ Resources:
   DeleteChatFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: deleteChatHandler
       Handler: handlers.deleteChatHandler
       CodeUri: ../backend/lambda/api/
       Policies:
@@ -506,7 +494,6 @@ Resources:
   GetMyProfileFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: getMyProfileHandler
       Handler: handlers.getMyProfileHandler
       CodeUri: ../backend/lambda/api/
       Policies:
@@ -524,7 +511,6 @@ Resources:
   PutMyProfileFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: putMyProfileHandler
       Handler: handlers.putMyProfileHandler
       CodeUri: ../backend/lambda/api/
       Policies:
@@ -549,7 +535,6 @@ Resources:
   GenerateStudioScoreBatch:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: generateStudioScoreBatch
       Handler: generate_studio_score.handler
       CodeUri: ../backend/lambda/batch/
       Timeout: 420
@@ -578,7 +563,6 @@ Resources:
   AdminRunAiBatchFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: adminRunAiBatch
       Handler: admin_trigger.handler
       CodeUri: ../backend/lambda/batch/
       Timeout: 330
@@ -606,7 +590,6 @@ Resources:
   DiscoverStudiosBatch:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: discoverStudiosBatch
       Handler: discover_studios.handler
       CodeUri: ../backend/lambda/batch/
       Timeout: 120
@@ -625,7 +608,6 @@ Resources:
   AdminRunStudioDiscoveryFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: adminRunStudioDiscovery
       Handler: admin_trigger.handler
       CodeUri: ../backend/lambda/batch/
       Environment:
