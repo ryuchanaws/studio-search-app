@@ -15,7 +15,8 @@ import { StudioDiscoveryButton } from "../components/StudioDiscoveryButton";
 import { DetailModal } from "../components/DetailModal";
 import { NearbyModal } from "../components/NearbyModal";
 import type { Recommendation } from "../types";
-import { RefreshCw, LocateFixed, Users, Banknote } from "lucide-react";
+import { RefreshCw, LocateFixed, Users, Banknote, MapPin } from "lucide-react";
+import { extractPrefecture } from "../utils/area";
 
 /** 収容人数の絞り込み選択肢（discover_studios.py の CAPACITY_CATEGORIES と一致させる） */
 const CAPACITY_OPTIONS = ["少人数向け（〜5人）", "小グループ向け（6〜10人）", "中〜大人数対応（11人〜）"];
@@ -62,8 +63,22 @@ export const TopPage = () => {
   const [capacityFilter, setCapacityFilter] = useState<string | null>(null);
   /** 選択中の料金上限フィルタ（nullなら絞り込みなし） */
   const [maxPriceFilter, setMaxPriceFilter] = useState<number | null>(null);
+  /** 選択中のエリア（都道府県）フィルタ（nullなら絞り込みなし） */
+  const [areaFilter, setAreaFilter] = useState<string | null>(null);
 
-  /** 人数・料金フィルタの両方を満たすおすすめのみを残す。
+  /** 出現する都道府県を件数順に並べたフィルタ用チップ一覧。
+   * バックエンドに都道府県専用フィールドは無いため、Studio.description（住所文字列）から
+   * その都度抽出する（既存スタジオも含めて追加のバックフィルなしで絞り込みに使える） */
+  const availableAreas = useMemo(() => {
+    const counts = new Map<string, number>();
+    recommendations.forEach((rec) => {
+      const area = extractPrefecture(rec.studio?.description);
+      if (area) counts.set(area, (counts.get(area) ?? 0) + 1);
+    });
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([a]) => a);
+  }, [recommendations]);
+
+  /** 人数・料金・エリアのすべての条件を満たすおすすめのみを残す。
    * 料金で絞り込んでいる場合、価格情報が不明（問合せのみ）のスタジオは対象外とする
    * （「上限以下かどうか」を判断できないデータを誤って含めないため） */
   const filteredRecommendations = useMemo(() => {
@@ -73,11 +88,12 @@ export const TopPage = () => {
         const price = cheapestPrice(rec);
         if (price == null || price > maxPriceFilter) return false;
       }
+      if (areaFilter && extractPrefecture(rec.studio?.description) !== areaFilter) return false;
       return true;
     });
-  }, [recommendations, capacityFilter, maxPriceFilter]);
+  }, [recommendations, capacityFilter, maxPriceFilter, areaFilter]);
 
-  const isFiltered = capacityFilter != null || maxPriceFilter != null;
+  const isFiltered = capacityFilter != null || maxPriceFilter != null || areaFilter != null;
   const top3 = filteredRecommendations.slice(0, 3);
   const rest = filteredRecommendations.slice(3);
 
@@ -105,9 +121,23 @@ export const TopPage = () => {
         <StudioDiscoveryButton />
       </div>
 
-      {/* 人数・料金での絞り込み。AI分析・現在地から探すのどちらの結果にも同じ条件で効く */}
+      {/* エリア・人数・料金での絞り込み。AI分析・現在地から探すのどちらの結果にも同じ条件で効く */}
       {recommendations.length > 0 && (
         <div className="top-filter-bar">
+          {availableAreas.length > 0 && (
+            <div className="top-filter-group">
+              <span className="top-filter-label"><MapPin size={12} /> エリア</span>
+              {availableAreas.map((a) => (
+                <button
+                  key={a}
+                  className={`facility-tag sm facility-filter-chip ${areaFilter === a ? "active" : ""}`}
+                  onClick={() => setAreaFilter(areaFilter === a ? null : a)}
+                >
+                  {a}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="top-filter-group">
             <span className="top-filter-label"><Users size={12} /> 人数</span>
             {CAPACITY_OPTIONS.map((c) => (
@@ -192,7 +222,7 @@ export const TopPage = () => {
           {recommendations.length > 0 && filteredRecommendations.length === 0 && (
             <div className="empty-state">
               <p>条件に合うスタジオが見つかりませんでした</p>
-              <p className="empty-hint">人数・料金の絞り込みを変えてみてください</p>
+              <p className="empty-hint">エリア・人数・料金の絞り込みを変えてみてください</p>
             </div>
           )}
         </>
