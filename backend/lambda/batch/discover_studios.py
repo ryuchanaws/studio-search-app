@@ -67,9 +67,27 @@ CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 STUDIOS_TABLE = os.environ.get("STUDIOS_TABLE", "studio-studios")
 
 # 位置指定なし（全国探索）時の検索キーワード
-NATIONWIDE_QUERIES = ["ダンススタジオ レンタル", "ヨガスタジオ レンタル", "レンタルスタジオ 鏡張り"]
+NATIONWIDE_QUERIES = ["ダンススタジオ レンタル", "レンタルスタジオ 鏡張り"]
 # 現在地指定あり（近傍探索）時の検索キーワード。位置バイアスで絞り込むためクエリは単純でよい
-NEARBY_QUERY = "レンタルスタジオ"
+NEARBY_QUERY = "ダンススタジオ レンタル"
+
+# ダンスに関係ないスタジオ（ヨガ・ピラティス）を除外するための名前キーワード。
+# Google Placesのtypesではヨガ・ピラティスとダンスを区別できない（どちらもgym/health系タグの
+# ことが多い）ため、店名に含まれるキーワードで判定する（大文字小文字は区別しない）
+EXCLUDED_NAME_KEYWORDS = ["ヨガ", "yoga", "ピラティス", "pilates"]
+
+
+def is_excluded_by_name(name: str) -> bool:
+    """スタジオ名にヨガ・ピラティス関連のキーワードが含まれているかを判定する。
+
+    Args:
+        name (str): スタジオ名
+
+    Returns:
+        bool: ダンスに関係ないスタジオとして除外すべきならTrue
+    """
+    lowered = name.lower()
+    return any(keyword.lower() in lowered for keyword in EXCLUDED_NAME_KEYWORDS)
 # 現在地指定時の検索半径（メートル）
 NEARBY_RADIUS_M = 15000
 
@@ -434,10 +452,13 @@ def run_discovery(location_bias: Optional[dict[str, float]] = None) -> dict[str,
 
     queries = [NEARBY_QUERY] if location_bias else NATIONWIDE_QUERIES
 
-    # 複数クエリの結果を集約し、クエリ間の重複も除去する
+    # 複数クエリの結果を集約し、クエリ間の重複も除去する。
+    # ヨガ・ピラティススタジオ（ダンスに無関係）は店名キーワードでここで除外する
     candidates: dict[str, dict[str, Any]] = {}
     for query in queries:
         for c in search_places(query, places_key, location_bias):
+            if is_excluded_by_name(c["name"]):
+                continue
             key = f"{c['lat']:.5f},{c['lng']:.5f}"
             candidates.setdefault(key, c)
 

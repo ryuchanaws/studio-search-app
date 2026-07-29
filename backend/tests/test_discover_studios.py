@@ -32,6 +32,20 @@ def test_guess_facilities_without_api_key_returns_default():
     assert result == ["鏡張り", "フローリング"]
 
 
+def test_is_excluded_by_name_matches_yoga_and_pilates():
+    """ヨガ・ピラティス関連のキーワードを含む店名は除外対象と判定される（大文字小文字も無視）。"""
+    assert discover_studios.is_excluded_by_name("〇〇ヨガスタジオ") is True
+    assert discover_studios.is_excluded_by_name("△△Yoga Studio") is True
+    assert discover_studios.is_excluded_by_name("ピラティススタジオ□□") is True
+    assert discover_studios.is_excluded_by_name("Pilates Room") is True
+
+
+def test_is_excluded_by_name_does_not_match_dance_studio():
+    """ダンススタジオの店名は除外対象と判定されない。"""
+    assert discover_studios.is_excluded_by_name("〇〇ダンススタジオ") is False
+    assert discover_studios.is_excluded_by_name("レンタルスタジオ鏡張り") is False
+
+
 def test_guess_capacity_without_api_key_returns_default():
     """APIキーが空文字の場合、Claude呼び出しをせずデフォルト区分を返す。"""
     result = discover_studios.guess_capacity("テストスタジオ", "テスト住所", api_key="")
