@@ -96,6 +96,12 @@ def dynamodb_tables():
             KeySchema=[{"AttributeName": "studioId", "KeyType": "HASH"}],
             BillingMode="PAY_PER_REQUEST",
         )
+        client.create_table(
+            TableName=os.environ["ANALYTICS_TABLE"],
+            AttributeDefinitions=[{"AttributeName": "eventId", "AttributeType": "S"}],
+            KeySchema=[{"AttributeName": "eventId", "KeyType": "HASH"}],
+            BillingMode="PAY_PER_REQUEST",
+        )
         import handlers
 
         importlib.reload(handlers)
@@ -522,3 +528,53 @@ def test_post_chat_edit_nonexistent_chat_returns_404(dynamodb_tables):
         _api_event(body={"chatId": "does-not-exist", "message": "訂正", "editIndex": 0}), None
     )
     assert resp["statusCode"] == 404
+
+
+def test_post_analytics_event_records_view_detail(dynamodb_tables):
+    """view_detailイベントが記録され、テーブルに保存される。"""
+    handlers = dynamodb_tables
+
+    resp = handlers.postAnalyticsEventHandler(
+        _api_event(body={"eventType": "view_detail", "studioId": "studio-001"}), None
+    )
+    assert resp["statusCode"] == 201
+
+    table = handlers._get_table(handlers.ANALYTICS_TABLE)
+    items = table.scan()["Items"]
+    assert len(items) == 1
+    assert items[0]["eventType"] == "view_detail"
+    assert items[0]["studioId"] == "studio-001"
+
+
+def test_post_analytics_event_records_click_reserve(dynamodb_tables):
+    """click_reserveイベントも同様に記録される。"""
+    handlers = dynamodb_tables
+
+    resp = handlers.postAnalyticsEventHandler(
+        _api_event(body={"eventType": "click_reserve", "studioId": "studio-001"}), None
+    )
+    assert resp["statusCode"] == 201
+
+    table = handlers._get_table(handlers.ANALYTICS_TABLE)
+    items = table.scan()["Items"]
+    assert items[0]["eventType"] == "click_reserve"
+
+
+def test_post_analytics_event_rejects_invalid_event_type(dynamodb_tables):
+    """許可されていないeventTypeは400になる。"""
+    handlers = dynamodb_tables
+
+    resp = handlers.postAnalyticsEventHandler(
+        _api_event(body={"eventType": "something_else", "studioId": "studio-001"}), None
+    )
+    assert resp["statusCode"] == 400
+
+
+def test_post_analytics_event_requires_studio_id(dynamodb_tables):
+    """studioIdが無い場合は400になる。"""
+    handlers = dynamodb_tables
+
+    resp = handlers.postAnalyticsEventHandler(
+        _api_event(body={"eventType": "view_detail"}), None
+    )
+    assert resp["statusCode"] == 400

@@ -30,7 +30,9 @@ os.environ.setdefault("POSTS_TABLE", "test-studio-posts")
 os.environ.setdefault("CHATS_TABLE", "test-studio-chats")
 os.environ.setdefault("USAGE_TABLE", "test-studio-usage")
 os.environ.setdefault("USERS_TABLE", "test-studio-users")
+os.environ.setdefault("ANALYTICS_TABLE", "test-studio-analytics-events")
 os.environ.setdefault("UPLOADS_BUCKET", "test-studio-search-app-uploads")
+os.environ.setdefault("NOTIFY_EMAIL", "test@example.com")
 # moto用のダミー認証情報を強制的に上書きする（setdefaultではなく代入）。
 # 実行環境に本物の認証情報が環境変数として既に設定されている場合、setdefaultでは
 # 上書きされず、moto非対応の呼び出しが万一残っていた際に実AWSへ到達してしまう恐れがあるため

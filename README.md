@@ -339,6 +339,37 @@ AI相談（`POST /chat`）に1ユーザー1日あたり30件（`handlers.py` の
 
 ---
 
+## 9.5 アクセス状況の日次メール通知（SESセットアップが必要）
+
+スタジオ詳細の表示（`view_detail`）・予約ボタンのクリック（`click_reserve`）を
+`AnalyticsEventsTable` に記録し、毎日AM6:30 JST（スコア計算バッチの30分後）に
+`sendAnalyticsDigestBatch` が直近24時間分を集計して、閲覧数・クリック数・
+コンバージョン率（クリック数/閲覧数）をメールで通知する。
+
+> **注意:** 「予約完了」自体は外部サイト（スタジオの公式サイトや電話）で行われるため
+> このアプリからは計測できない。`click_reserve` が示すのは「予約ページ・電話番号への
+> クリック」までであり、実際に予約が成立したかどうかは分からない。
+
+### SESの検証（デプロイ前に必須）
+
+メール送信には Amazon SES を使用しており、`template.yaml` の `NOTIFY_EMAIL`
+（デフォルト `ryuchan.aws@gmail.com`）が送信元・宛先の両方に使われる。SESの
+初期状態（サンドボックス環境）では未検証のメールアドレスへは送信できないため、
+デプロイ前に以下の手順でこのアドレスを検証する必要がある。
+
+1. [AWS Console → SES → Verified identities](https://ap-northeast-1.console.aws.amazon.com/ses/home?region=ap-northeast-1#/verified-identities) を開く
+2. 「IDを作成」→ Identity type: **メールアドレス** → `ryuchan.aws@gmail.com` を入力して作成
+3. そのアドレス宛に確認メールが届くので、本文中のリンクをクリックして検証を完了する
+4. 検証完了後（コンソール上でStatusが"Verified"になれば）、次回のバッチ実行からメールが届くようになる
+
+> 送信元・宛先を別アドレスにしたい場合は `template.yaml` の
+> `SendAnalyticsDigestBatch.Properties.Environment.Variables.NOTIFY_EMAIL` を変更し、
+> **両方**のアドレスをSESで検証すること（サンドボックス環境では宛先も検証必須）。
+> 本番運用でサンドボックスを解除したい場合はSESの「本番アクセスをリクエスト」を
+> 申請する（このアプリ規模では個人宛の通知のみのため、サンドボックスのままで十分）。
+
+---
+
 ## 10. 利用料アラート
 
 ### AWS（自動化済み）
@@ -391,3 +422,4 @@ Claude APIの課金もAWS/Google Cloudいずれの外（Anthropic）で発生す
 | 「AI分析を実行」「現在地から新スタジオを探す」が「本日の利用回数（n件）に達しました」を返す | Places/Claude APIコスト保護のための1日あたりレート制限に達した | 想定どおりの動作。翌日には自動でリセットされる。上限値は`template.yaml`の`RATE_LIMIT_DAILY`で調整できる |
 | 投稿の編集ボタンが表示されない | 自分の投稿ではない（他人の投稿には表示されない仕様） | 想定どおりの動作。自分の投稿のみ編集・削除ボタンが表示される |
 | 投稿を編集しようとすると失敗する | 他人の投稿を編集しようとした（backend側の所有者チェックで403） | 通常UI上は自分の投稿にしか編集ボタンが出ないため発生しないはずだが、発生する場合はログイン中のアカウントを確認 |
+| アクセス状況のダイジェストメールが届かない | SESで`NOTIFY_EMAIL`のアドレスが未検証（サンドボックス環境の制約） | 上記「9.5 アクセス状況の日次メール通知」のSES検証手順を実施する。CloudWatch Logsの`sendAnalyticsDigestBatch`で`SES send_email error`が出ていないか確認 |

@@ -6,12 +6,12 @@
  * Google Maps ナビとお気に入りトグルボタンを提供する。
  */
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { X, Navigation2, Heart, Sparkles, Star, TrendingUp, TrainFront, Users, Banknote, Camera, MessageSquare, CalendarCheck, Phone } from "lucide-react";
 import type { Recommendation } from "../types";
 import { getScoreColor, getScoreLabel, formatPriceRange } from "../utils/score";
-import { getPresignedUploadUrl, uploadImageToS3, updateStudioImage } from "../api/client";
+import { getPresignedUploadUrl, uploadImageToS3, updateStudioImage, recordAnalyticsEvent } from "../api/client";
 import { ImagePreviewPopover } from "./ImagePreviewPopover";
 
 /**
@@ -49,6 +49,14 @@ export const DetailModal = ({ recommendation: rec, isFavorite, onClose, onToggle
   /** アップロード失敗時のエラーメッセージ（サイズ超過など） */
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 詳細モーダルが開かれた（=スタジオ詳細を表示した）タイミングで計測する。
+  // 依存配列を空にして初回マウント時のみ発火させる（studioId切り替えでの再マウントも
+  // Reactのkey次第だが、DetailModalは呼び出し側でrec変更時に都度アンマウント/再マウントされる想定）
+  useEffect(() => {
+    void recordAnalyticsEvent("view_detail", rec.studioId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * Google Maps のルート案内を新しいタブで開く。
@@ -176,12 +184,17 @@ export const DetailModal = ({ recommendation: rec, isFavorite, onClose, onToggle
               target="_blank"
               rel="noreferrer"
               className="btn-nav btn-reserve"
+              onClick={() => recordAnalyticsEvent("click_reserve", rec.studioId)}
             >
               <CalendarCheck size={16} />
               予約する（公式サイト）
             </a>
           ) : rec.studio?.phoneNumber ? (
-            <a href={`tel:${rec.studio.phoneNumber}`} className="btn-nav btn-reserve">
+            <a
+              href={`tel:${rec.studio.phoneNumber}`}
+              className="btn-nav btn-reserve"
+              onClick={() => recordAnalyticsEvent("click_reserve", rec.studioId)}
+            >
               <Phone size={16} />
               電話で予約（{rec.studio.phoneNumber}）
             </a>

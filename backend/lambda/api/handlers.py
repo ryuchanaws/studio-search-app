@@ -8,6 +8,7 @@ Endpoints:
     GET    /recommendations
     GET    /studios
     PUT    /studios/{studioId}/image
+    POST   /analytics/event
     GET    /posts
     POST   /posts
     PUT    /posts/{postId}
@@ -67,6 +68,13 @@ CHATS_TABLE = os.environ.get("CHATS_TABLE", "studio-chats")
 USAGE_TABLE = os.environ.get("USAGE_TABLE", "studio-usage")
 # ユーザーが自分で設定する表示名（ユーザー名）を保存するテーブル
 USERS_TABLE = os.environ.get("USERS_TABLE", "studio-users")
+# スタジオ詳細の表示・予約ボタンのクリックを記録するテーブル
+ANALYTICS_TABLE = os.environ.get("ANALYTICS_TABLE", "studio-analytics-events")
+
+# postAnalyticsEventHandlerが受け付けるイベント種別
+VALID_ANALYTICS_EVENT_TYPES = {"view_detail", "click_reserve"}
+# アナリティクスイベントの保持期間（日）。TTL（expiresAt）で自動削除される
+ANALYTICS_EVENT_TTL_DAYS = 90
 
 # ─────────────────────────────
 # S3（スタジオ写真・投稿写真のアップロード先）
@@ -277,6 +285,58 @@ def getStudiosHandler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     table = _get_table(STUDIOS_TABLE)
     items = table.scan().get("Items", [])
     return _resp(200, {"items": _decimal_to_float(items)})
+
+
+# ─────────────────────────────
+# /analytics/event
+# ─────────────────────────────
+@handler_guard
+def postAnalyticsEventHandler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    """POST /analytics/event — スタジオ詳細の表示・予約ボタンのクリックを記録する。
+
+    未ログインの閲覧行動も知りたいため、このエンドポイントには
+    CognitoAuthorizer をアタッチしていない（認証不要）。そのため
+    ログイン中であってもuserIdは常にDEFAULT_USER_IDになる
+    （オーソライザーを経由しないリクエストにはCognitoのクレームが付与されないため）。
+    現状は個人ごとの内訳ではなく、全体の閲覧数・クリック数・コンバージョン率の
+    集計にのみ使う想定。
+
+    「予約完了」自体は外部サイト（スタジオ側）で行われるため計測できず、
+    click_reserve が示すのは「予約ページへのクリック」までである点に注意。
+
+    Args:
+        event (dict[str, Any]): API Gateway イベントオブジェクト
+            body (str): JSON文字列。eventType(必須。"view_detail" or "click_reserve") /
+                studioId(必須) を含む
+        context (Any): Lambda コンテキストオブジェクト
+
+    Returns:
+        dict[str, Any]:
+            成功時 201: {"message": "recorded"}
+            eventType/studioId 不正時 400: {"error": "..."}
+    """
+    body = json.loads(event.get("body") or "{}")
+
+    event_type = body.get("eventType")
+    studio_id = body.get("studioId")
+
+    if event_type not in VALID_ANALYTICS_EVENT_TYPES:
+        return _resp(400, {"error": "eventType must be one of: view_detail, click_reserve"})
+    if not studio_id:
+        return _resp(400, {"error": "studioId is required"})
+
+    now = datetime.now(timezone.utc)
+    table = _get_table(ANALYTICS_TABLE)
+    table.put_item(Item={
+        "eventId": str(uuid.uuid4()),
+        "eventType": event_type,
+        "studioId": studio_id,
+        "userId": _get_user_id(event),
+        "createdAt": now.isoformat(),
+        "expiresAt": int(now.timestamp()) + ANALYTICS_EVENT_TTL_DAYS * 24 * 60 * 60,
+    })
+
+    return _resp(201, {"message": "recorded"})
 
 
 # ─────────────────────────────

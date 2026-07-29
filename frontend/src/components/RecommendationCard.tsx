@@ -10,6 +10,7 @@ import { useState } from "react";
 import { Heart, Navigation2, Sparkles, TrainFront, Users, CalendarCheck, Phone } from "lucide-react";
 import type { Recommendation } from "../types";
 import { getScoreColor, getScoreLabel, formatScore, getRatingIcon, getPopularityIcon, formatPriceRange } from "../utils/score";
+import { recordAnalyticsEvent } from "../api/client";
 import { ImagePreviewPopover } from "./ImagePreviewPopover";
 
 /**
@@ -143,12 +144,17 @@ export const RecommendationCard = ({
             target="_blank"
             rel="noreferrer"
             className="reserve-btn"
+            onClick={() => recordAnalyticsEvent("click_reserve", rec.studioId)}
           >
             <CalendarCheck size={15} />
             予約する
           </a>
         ) : rec.studio?.phoneNumber ? (
-          <a href={`tel:${rec.studio.phoneNumber}`} className="reserve-btn">
+          <a
+            href={`tel:${rec.studio.phoneNumber}`}
+            className="reserve-btn"
+            onClick={() => recordAnalyticsEvent("click_reserve", rec.studioId)}
+          >
             <Phone size={15} />
             電話で予約
           </a>

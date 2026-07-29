@@ -41,6 +41,7 @@ Globals:
         CHATS_TABLE: !Ref ChatsTable
         USAGE_TABLE: !Ref UsageTable
         USERS_TABLE: !Ref UsersTable
+        ANALYTICS_TABLE: !Ref AnalyticsEventsTable
         UPLOADS_BUCKET: !Ref UploadsBucket
 
 Resources:
@@ -197,6 +198,22 @@ Resources:
       KeySchema:
         - { AttributeName: userId, KeyType: HASH }
 
+  # スタジオ詳細の表示（view_detail）・予約ボタンのクリック（click_reserve）を記録する。
+  # 「予約完了」は外部サイト（スタジオ側）で行われるため実際には追跡できず、
+  # ここで追えるのは「予約ページへのクリック」までである点に注意
+  AnalyticsEventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: studio-analytics-events
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: eventId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: eventId, KeyType: HASH }
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
   # ==============================================================
   # S3 バケット（スタジオ写真・投稿写真のアップロード先）
   # ==============================================================
@@ -260,6 +277,23 @@ Resources:
             RestApiId: !Ref Api
             Path: /studios
             Method: GET
+
+  # スタジオ詳細の表示・予約ボタンのクリックを記録する。未ログインでも計測できるよう
+  # 認証は必須にしない（閲覧だけのユーザーの行動も知りたいため）
+  PostAnalyticsEventFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers.postAnalyticsEventHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref AnalyticsEventsTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /analytics/event
+            Method: POST
 
   GetPostsFunction:
     Type: AWS::Serverless::Function
@@ -631,6 +665,36 @@ Resources:
             Method: POST
             Auth:
               Authorizer: CognitoAuthorizer
+
+  # AnalyticsEventsTableの前日分イベントを集計し、閲覧数・予約ボタンクリック数・
+  # コンバージョン率（クリック数/閲覧数）をメールで通知する日次バッチ。
+  # 「予約完了」自体は外部サイトで行われるため計測できず、あくまで
+  # 「予約ページへのクリック」までのコンバージョンである点に注意
+  SendAnalyticsDigestBatch:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: send_analytics_digest.handler
+      CodeUri: ../backend/lambda/batch/
+      Timeout: 60
+      Environment:
+        Variables:
+          NOTIFY_EMAIL: ryuchan.aws@gmail.com
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref AnalyticsEventsTable }
+        - DynamoDBReadPolicy: { TableName: !Ref StudiosTable }
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: "*"
+      Events:
+        # スコア計算バッチ（AM6:00 JST）の30分後に実行
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(30 21 * * ? *)
+            Enabled: true
 
   # ==============================================================
   # AWS利用料アラート（月$10、80%/100%到達時にメール通知）

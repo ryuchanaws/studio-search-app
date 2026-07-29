@@ -115,6 +115,27 @@ export const removeFavorite = async (studioId: string): Promise<void> => {
 };
 
 /**
+ * スタジオ詳細の表示・予約ボタンのクリックを記録する（認証不要・未ログインでも送信できる）。
+ *
+ * 計測が目的の副作用的な呼び出しのため、失敗してもUIをブロックしない
+ * （呼び出し側は結果を待たずfire-and-forgetで呼ぶことを想定し、ここでエラーを握り潰す）。
+ *
+ * @param {"view_detail" | "click_reserve"} eventType - イベント種別
+ * @param {string} studioId - 対象スタジオID
+ * @returns {Promise<void>}
+ */
+export const recordAnalyticsEvent = async (
+  eventType: "view_detail" | "click_reserve",
+  studioId: string
+): Promise<void> => {
+  try {
+    await api.post("/analytics/event", { eventType, studioId });
+  } catch {
+    // 計測失敗はユーザー体験に影響させない（ログも出さず静かに無視する）
+  }
+};
+
+/**
  * AI バッチ処理を非同期に起動する。
  *
  * POST /admin/run-ai-batch を呼び出し、generateStudioScoreBatch Lambda を
