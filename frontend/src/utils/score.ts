@@ -82,6 +82,25 @@ export const getPopularityIcon = (score: number): string => {
 };
 
 /**
+ * 料金プラン一覧から表示用の価格帯文字列を組み立てる。
+ * 複数プランがあれば最安〜最高、1件のみなら単一の金額、無ければ単一cost、
+ * どちらも無ければ「問合せ」を返す。
+ *
+ * @param {{priceYen: number}[] | undefined} priceOptions - 料金プラン一覧
+ * @param {number} cost - 単一の代表料金（priceOptionsが無い場合のフォールバック）
+ * @returns {string} 表示用の価格帯文字列
+ */
+export const formatPriceRange = (priceOptions: { priceYen: number }[] | undefined, cost: number): string => {
+  if (priceOptions && priceOptions.length > 0) {
+    const prices = priceOptions.map((p) => p.priceYen);
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    return min === max ? `約¥${min.toLocaleString()}/時間` : `約¥${min.toLocaleString()}〜¥${max.toLocaleString()}/時間`;
+  }
+  return !cost || cost === 0 ? "問合せ" : `約¥${cost.toLocaleString()}/時間`;
+};
+
+/**
  * 距離（km）をバックエンドの calc_score と同じ正規化係数(0〜100)に変換する。
  * distanceKm/100 を 0〜100 にクランプして返す（backend/lambda/batch/generate_studio_score.py
  * の calc_score() 内の dist_norm と同一の計算式）。

@@ -79,7 +79,7 @@ def main(dry_run: bool) -> None:
 
     targets = [
         it for it in items
-        if "capacityCategory" not in it or "nearestStationDistanceM" not in it or "website" not in it
+        if "capacityCategory" not in it or "nearestStationDistanceM" not in it or "priceOptions" not in it
     ]
     print(f"Total studios: {len(items)} / needs backfill: {len(targets)}")
 
@@ -102,26 +102,35 @@ def main(dry_run: bool) -> None:
 
         website = studio.get("website")
         phone_number = studio.get("phoneNumber")
+        price_options = studio.get("priceOptions") or []
         cost_yen = int(studio.get("costYen", 0))
-        if place_id and "website" not in studio:
-            details = ds.fetch_place_details(place_id, places_key)
-            website = details["website"]
-            phone_number = details["phoneNumber"]
-            if cost_yen == 0 and website:
-                scraped = ds.scrape_price_from_website(website, anthropic_key)
-                if scraped is not None:
-                    cost_yen = scraped
+        if place_id and "priceOptions" not in studio:
+            if not website:
+                details = ds.fetch_place_details(place_id, places_key)
+                website = details["website"]
+                phone_number = details["phoneNumber"]
+            if website:
+                scraped_plans = ds.scrape_price_plans_from_website(website, anthropic_key)
+                if scraped_plans:
+                    price_options = scraped_plans
+                    cost_yen = min(p["priceYen"] for p in scraped_plans)
 
         print(f"    capacity={capacity_category} station={nearest_station_m}m cost={cost_yen} "
-              f"placeId={'yes' if place_id else 'no'} website={'yes' if website else 'no'} phone={'yes' if phone_number else 'no'}")
+              f"plans={len(price_options)} placeId={'yes' if place_id else 'no'} website={'yes' if website else 'no'}")
 
         if not dry_run:
-            update_expr = "SET capacityCategory = :cap, costYen = :cost, website = :web, phoneNumber = :phone"
+            update_expr = (
+                "SET capacityCategory = :cap, costYen = :cost, website = :web, "
+                "phoneNumber = :phone, priceOptions = :plans"
+            )
             expr_values: dict = {
                 ":cap": capacity_category,
                 ":cost": Decimal(str(cost_yen)),
                 ":web": website,
                 ":phone": phone_number,
+                ":plans": [
+                    {"label": p["label"], "priceYen": Decimal(str(p["priceYen"]))} for p in price_options
+                ],
             }
             if nearest_station_m is not None:
                 update_expr += ", nearestStationDistanceM = :station"

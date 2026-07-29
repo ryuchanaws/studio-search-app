@@ -81,18 +81,87 @@ def test_fetch_place_details_returns_website_and_phone_when_present(monkeypatch)
     assert result == {"website": "https://example.com", "phoneNumber": "03-1234-5678"}
 
 
-def test_scrape_price_from_website_without_api_key_returns_none():
+def test_scrape_price_plans_without_api_key_returns_none():
     """Anthropic APIキー未設定時は取得を試みずNoneを返す。"""
-    assert discover_studios.scrape_price_from_website("https://example.com", api_key="") is None
+    assert discover_studios.scrape_price_plans_from_website("https://example.com", api_key="") is None
 
 
-def test_scrape_price_from_website_returns_none_on_fetch_error(monkeypatch):
+def test_scrape_price_plans_returns_none_on_fetch_error(monkeypatch):
     """サイト取得自体が失敗した場合はNoneを返し、例外を投げない。"""
     def raise_error(req, timeout):
         raise Exception("connection refused")
 
     monkeypatch.setattr(discover_studios.urllib.request, "urlopen", raise_error)
-    assert discover_studios.scrape_price_from_website("https://example.com", api_key="fake-anthropic-key") is None
+    assert discover_studios.scrape_price_plans_from_website("https://example.com", api_key="fake-anthropic-key") is None
+
+
+def test_scrape_price_plans_parses_valid_json_array(monkeypatch):
+    """Claudeが正しいJSON配列を返せば、label/priceYenのリストとして返す。"""
+    class FakeContent:
+        def __init__(self, text):
+            self.text = text
+
+    class FakeResponse:
+        def __init__(self, text):
+            self.content = [FakeContent(text)]
+
+    class FakeMessages:
+        def create(self, **kwargs):
+            return FakeResponse('[{"label": "Aスタジオ 20㎡", "priceYen": 3000}, {"label": "Bスタジオ 40㎡", "priceYen": 5000}]')
+
+    class FakeAnthropic:
+        def __init__(self, api_key):
+            self.messages = FakeMessages()
+
+    monkeypatch.setattr(discover_studios.urllib.request, "urlopen", lambda req, timeout: _FakeHttpResponse(b"<html>price info</html>"))
+    monkeypatch.setattr(discover_studios.anthropic, "Anthropic", FakeAnthropic)
+
+    plans = discover_studios.scrape_price_plans_from_website("https://example.com", api_key="fake-anthropic-key")
+    assert plans == [
+        {"label": "Aスタジオ 20㎡", "priceYen": 3000},
+        {"label": "Bスタジオ 40㎡", "priceYen": 5000},
+    ]
+
+
+def test_scrape_price_plans_returns_empty_list_when_no_price_found(monkeypatch):
+    """Claudeが空配列を返せば、料金情報なしとして空リストを返す（Noneとは区別する）。"""
+    class FakeContent:
+        def __init__(self, text):
+            self.text = text
+
+    class FakeResponse:
+        def __init__(self, text):
+            self.content = [FakeContent(text)]
+
+    class FakeMessages:
+        def create(self, **kwargs):
+            return FakeResponse("[]")
+
+    class FakeAnthropic:
+        def __init__(self, api_key):
+            self.messages = FakeMessages()
+
+    monkeypatch.setattr(discover_studios.urllib.request, "urlopen", lambda req, timeout: _FakeHttpResponse(b"<html>no price</html>"))
+    monkeypatch.setattr(discover_studios.anthropic, "Anthropic", FakeAnthropic)
+
+    plans = discover_studios.scrape_price_plans_from_website("https://example.com", api_key="fake-anthropic-key")
+    assert plans == []
+
+
+class _FakeHttpResponse:
+    """urllib.request.urlopen()の戻り値（コンテキストマネージャ）を模倣する簡易フェイク。"""
+
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self):
+        return self._body
 
 
 @pytest.fixture

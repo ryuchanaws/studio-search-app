@@ -6,6 +6,7 @@ import {
   recalcScoreForDistance,
   getRatingIcon,
   getPopularityIcon,
+  formatPriceRange,
 } from "./score";
 
 describe("getScoreColor", () => {
@@ -80,5 +81,25 @@ describe("getPopularityIcon", () => {
     expect(getPopularityIcon(65)).toBe("👍");
     expect(getPopularityIcon(45)).toBe("🙂");
     expect(getPopularityIcon(20)).toBe("🌱");
+  });
+});
+
+describe("formatPriceRange", () => {
+  it("shows a single price when there is exactly one plan", () => {
+    expect(formatPriceRange([{ priceYen: 3000 }], 0)).toBe("約¥3,000/時間");
+  });
+
+  it("shows a min-max range when there are multiple plans", () => {
+    expect(formatPriceRange([{ priceYen: 3000 }, { priceYen: 5000 }], 0)).toBe("約¥3,000〜¥5,000/時間");
+  });
+
+  it("falls back to the single cost value when there are no price options", () => {
+    expect(formatPriceRange(undefined, 2500)).toBe("約¥2,500/時間");
+    expect(formatPriceRange([], 2500)).toBe("約¥2,500/時間");
+  });
+
+  it("shows an inquiry label when neither price options nor cost are available", () => {
+    expect(formatPriceRange(undefined, 0)).toBe("問合せ");
+    expect(formatPriceRange([], 0)).toBe("問合せ");
   });
 });

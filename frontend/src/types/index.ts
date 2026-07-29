@@ -6,6 +6,16 @@
  */
 
 /**
+ * 部屋・時間帯ごとの料金プラン（公式サイトからAIが抽出）。
+ */
+export interface PriceOption {
+  /** プラン・部屋名（例: "Aスタジオ 20㎡"） */
+  label: string;
+  /** 1時間あたりの料金（円） */
+  priceYen: number;
+}
+
+/**
  * レンタルスタジオのマスタデータ。
  * DynamoDB の studio-studios テーブルのレコードに対応する。
  */
@@ -30,6 +40,8 @@ export interface Studio {
   website?: string;
   /** 電話番号（省略可・Google Places Detailsから取得） */
   phoneNumber?: string;
+  /** 部屋・時間帯ごとの料金プラン（省略可・公式サイトからAIが抽出。無ければ問合せ扱い） */
+  priceOptions?: PriceOption[];
 }
 
 /**
@@ -55,6 +67,8 @@ export interface Recommendation {
   capacityCategory?: string;
   /** 利用料金（円。0 = 不明/情報なし。公式サイトからのAI抽出値なので目安として扱う） */
   cost: number;
+  /** 部屋・時間帯ごとの料金プラン（省略可） */
+  priceOptions?: PriceOption[];
   /** 口コミ評価スコア（0〜100） */
   ratingScore: number;
   /** 人気度スコア（0〜100） */

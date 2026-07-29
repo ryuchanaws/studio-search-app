@@ -334,20 +334,26 @@ def fetch_place_details(place_id: str, api_key: str) -> dict[str, Optional[str]]
         return {"website": None, "phoneNumber": None}
 
 
-def scrape_price_from_website(website_url: str, api_key: str) -> Optional[int]:
-    """スタジオの公式サイトを取得し、Claudeで利用料金（円/時間）の抽出を試みる。
+MAX_PRICE_PLANS = 5
 
+
+def scrape_price_plans_from_website(website_url: str, api_key: str) -> Optional[list[dict[str, Any]]]:
+    """スタジオの公式サイトを取得し、Claudeで利用料金プラン（部屋・時間帯ごと）の抽出を試みる。
+
+    多くのレンタルスタジオは複数の部屋・時間帯で料金が異なるため、単一の金額ではなく
+    「部屋名/プラン名 + 1時間あたりの料金」のリストとして抽出する。
     実在しない金額を作り出さないよう、Claudeには「サイト内に明記されていなければ
-    "不明" とだけ答える」よう指示する。サイト取得失敗・Claude未設定・"不明"回答・
-    数値として解釈できない応答の場合はすべてNoneを返し、呼び出し側は「問合せ」表示に
-    フォールバックする（実データが無いことを偽の数値で埋めないための設計）。
+    空配列を返す」よう指示する。サイト取得失敗・Claude未設定・パース不能な応答の場合は
+    すべてNoneを返し、呼び出し側は「問合せ」表示にフォールバックする
+    （実データが無いことを偽の数値で埋めないための設計）。
 
     Args:
         website_url (str): スタジオの公式サイトURL
         api_key     (str): Anthropic API キー
 
     Returns:
-        int | None: 抽出できた場合は概算の円/時間。それ以外はNone
+        list[dict] | None: [{"label": str, "priceYen": int}, ...]（最大MAX_PRICE_PLANS件）。
+            料金が全く読み取れない場合は空リスト。サイト取得・抽出自体に失敗した場合はNone
     """
     if not api_key:
         return None
@@ -367,20 +373,36 @@ def scrape_price_from_website(website_url: str, api_key: str) -> Optional[int]:
     try:
         client = anthropic.Anthropic(api_key=api_key)
         prompt = f"""以下はレンタルスタジオ公式サイトのHTMLの抜粋です。
-1時間あたりの利用料金が明記されていれば、その金額を円単位の数字のみで出力してください
-（例: 3000）。複数プランがある場合は最も標準的な/安いプランの金額にしてください。
-サイト内に料金が明記されていない、または読み取れない場合は "不明" とだけ出力してください。
-数字か「不明」以外は出力しないでください。
+1時間あたりの利用料金プランを抽出してください。部屋・広さ・時間帯によって複数の料金がある
+場合は、それぞれを個別の項目としてすべて含めてください（最大{MAX_PRICE_PLANS}件まで）。
+出力は次のJSON配列のみとし、前置き・説明・コードブロック記法は一切付けないでください:
+[{{"label": "部屋名や特徴（例: Aスタジオ 20㎡）", "priceYen": 3000}}, ...]
+料金が全く読み取れない場合は空配列 [] のみを出力してください。
 
 HTML抜粋:
 {text}"""
         response = client.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=20,
+            max_tokens=400,
             messages=[{"role": "user", "content": prompt}],
         )
         answer = response.content[0].text.strip()
-        return int(answer) if answer.isdigit() else None
+        # Claudeがコードブロック記法（```json ... ```）を付けてしまった場合に備えて除去する
+        answer = re.sub(r"^```(?:json)?|```$", "", answer.strip(), flags=re.MULTILINE).strip()
+
+        parsed = json.loads(answer)
+        if not isinstance(parsed, list):
+            return None
+
+        plans = []
+        for p in parsed[:MAX_PRICE_PLANS]:
+            if not isinstance(p, dict):
+                continue
+            label = p.get("label")
+            price = p.get("priceYen")
+            if isinstance(label, str) and isinstance(price, (int, float)) and price > 0:
+                plans.append({"label": label, "priceYen": int(price)})
+        return plans
 
     except Exception as e:
         print(f"Claude price extraction error: {e}")
@@ -447,6 +469,7 @@ def run_discovery(location_bias: Optional[dict[str, float]] = None) -> dict[str,
         nearest_station_m = find_nearest_station_distance_m(c["lat"], c["lng"], places_key)
 
         cost_yen = 0
+        price_options: list[dict[str, Any]] = []
         website = None
         phone_number = None
         place_id = c.get("place_id")
@@ -455,9 +478,10 @@ def run_discovery(location_bias: Optional[dict[str, float]] = None) -> dict[str,
             website = details["website"]
             phone_number = details["phoneNumber"]
             if website:
-                scraped_price = scrape_price_from_website(website, anthropic_key)
-                if scraped_price is not None:
-                    cost_yen = scraped_price
+                scraped_plans = scrape_price_plans_from_website(website, anthropic_key)
+                if scraped_plans:
+                    price_options = scraped_plans
+                    cost_yen = min(p["priceYen"] for p in scraped_plans)
 
         studio_id = f"studio-{random.getrandbits(32):08x}"
 
@@ -476,6 +500,9 @@ def run_discovery(location_bias: Optional[dict[str, float]] = None) -> dict[str,
             "distanceKm": Decimal(str(round(distance_km, 1))),
             "nearestStationDistanceM": nearest_station_m if nearest_station_m is not None else None,
             "costYen": Decimal(str(cost_yen)),
+            "priceOptions": [
+                {"label": p["label"], "priceYen": Decimal(str(p["priceYen"]))} for p in price_options
+            ],
             "description": c["address"],
             "imageUrl": image_url or "",
             "rating": Decimal(str(c["rating"])) if c.get("rating") is not None else None,

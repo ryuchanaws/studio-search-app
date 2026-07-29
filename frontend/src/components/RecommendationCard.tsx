@@ -7,9 +7,9 @@
  */
 
 import { useState } from "react";
-import { Heart, Navigation2, Sparkles, TrainFront, Users } from "lucide-react";
+import { Heart, Navigation2, Sparkles, TrainFront, Users, CalendarCheck, Phone } from "lucide-react";
 import type { Recommendation } from "../types";
-import { getScoreColor, getScoreLabel, formatScore, getRatingIcon, getPopularityIcon } from "../utils/score";
+import { getScoreColor, getScoreLabel, formatScore, getRatingIcon, getPopularityIcon, formatPriceRange } from "../utils/score";
 import { ImagePreviewPopover } from "./ImagePreviewPopover";
 
 /**
@@ -130,11 +130,30 @@ export const RecommendationCard = ({
             <Users size={12} style={{ verticalAlign: "-2px" }} /> {rec.capacityCategory}
           </span>
         )}
-        <span>💰 {!rec.cost || rec.cost === 0 ? "問合せ" : `約¥${rec.cost.toLocaleString()}/時間`}</span>
+        <span>💰 {formatPriceRange(rec.priceOptions, rec.cost)}</span>
       </div>
 
       {/* アクションボタン: クリックイベントがカード全体に伝播しないよう stopPropagation */}
       <div className="card-actions" onClick={(e) => e.stopPropagation()}>
+        {/* 予約リンク: 詳細モーダルを開かずカードから直接ワンクリックで予約ページへ。
+            公式サイトが無ければ電話番号のtel:リンクにフォールバックし、どちらも無ければ非表示 */}
+        {rec.studio?.website ? (
+          <a
+            href={rec.studio.website}
+            target="_blank"
+            rel="noreferrer"
+            className="reserve-btn"
+          >
+            <CalendarCheck size={15} />
+            予約する
+          </a>
+        ) : rec.studio?.phoneNumber ? (
+          <a href={`tel:${rec.studio.phoneNumber}`} className="reserve-btn">
+            <Phone size={15} />
+            電話で予約
+          </a>
+        ) : null}
+
         {/* Google Maps ナビゲーションボタン */}
         <button className="nav-btn" onClick={openNav}>
           <Navigation2 size={15} />

@@ -331,6 +331,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         studio_name:   str       = studio.get("name", studio_id)
         facility_tags: list[str] = studio.get("facilityTags", ["鏡張り", "フローリング"])
         capacity_category: str   = studio.get("capacityCategory", DEFAULT_CAPACITY_CATEGORY)
+        price_options: list      = studio.get("priceOptions") or []
         # distanceKm（基準地点からの距離）はスコアには使わず、フロントの
         # 「現在地から探す」再ランキング機能向けにそのままRecommendationsへ引き継ぐ
         distance_km:   float     = float(studio.get("distanceKm", 20.0))
@@ -371,6 +372,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "score":               Decimal(str(round(score, 2))),
             "facilityTags":        facility_tags,
             "capacityCategory":    capacity_category,
+            "priceOptions":        price_options,
             "reason":              reason,
             "distance":            Decimal(str(distance_km)),
             "stationDistanceKm":   Decimal(str(round(station_distance_km, 2))),

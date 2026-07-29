@@ -10,7 +10,7 @@ import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { X, Navigation2, Heart, Sparkles, Star, TrendingUp, TrainFront, Users, Banknote, Camera, MessageSquare, CalendarCheck, Phone } from "lucide-react";
 import type { Recommendation } from "../types";
-import { getScoreColor, getScoreLabel } from "../utils/score";
+import { getScoreColor, getScoreLabel, formatPriceRange } from "../utils/score";
 import { getPresignedUploadUrl, uploadImageToS3, updateStudioImage } from "../api/client";
 import { ImagePreviewPopover } from "./ImagePreviewPopover";
 
@@ -147,9 +147,24 @@ export const DetailModal = ({ recommendation: rec, isFavorite, onClose, onToggle
           <div className="stat-item">
             <Banknote size={18} />
             <span className="stat-label">費用</span>
-            <span className="stat-value">{!rec.cost || rec.cost === 0 ? "問合せ" : `約¥${rec.cost.toLocaleString()}/時間`}</span>
+            <span className="stat-value">{formatPriceRange(rec.priceOptions, rec.cost)}</span>
           </div>
         </div>
+
+        {/* 料金プラン一覧: 部屋・時間帯によって複数プランがある場合のみ表示 */}
+        {rec.priceOptions && rec.priceOptions.length > 1 && (
+          <div className="modal-section">
+            <h3 className="modal-section-title">料金プラン</h3>
+            <div className="price-plan-list">
+              {rec.priceOptions.map((p) => (
+                <div key={p.label} className="price-plan-row">
+                  <span className="price-plan-label">{p.label}</span>
+                  <span className="price-plan-yen">¥{p.priceYen.toLocaleString()}/時間</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* アクションボタン: 予約・ナビ・お気に入り */}
         <div className="modal-actions">
