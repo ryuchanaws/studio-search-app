@@ -732,6 +732,11 @@ body  {
   font-weight: 700;
 }
 
+.price-plan-inquiry-link {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 /* 部屋詳細カード: 写真・平面図・設備・公式サイト予約リンクを1部屋分にまとめる */
 .room-detail-list {
   display: flex;

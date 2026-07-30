@@ -6,11 +6,11 @@
  * Google Maps ナビとお気に入りトグルボタンを提供する。
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect } from "react";
 import { Link } from "react-router-dom";
-import { X, Navigation2, Heart, Camera, MessageSquare, CalendarCheck, Phone, Ruler } from "lucide-react";
+import { X, Navigation2, Heart, MessageSquare, CalendarCheck, Phone, Ruler } from "lucide-react";
 import type { Studio } from "../types";
-import { getPresignedUploadUrl, uploadImageToS3, updateStudioImage, recordAnalyticsEvent } from "../api/client";
+import { recordAnalyticsEvent } from "../api/client";
 import { ImagePreviewPopover } from "./ImagePreviewPopover";
 import { BRAND_LABELS, BRAND_COLORS } from "../utils/brand";
 
@@ -42,13 +42,10 @@ export const DetailModal = ({ studio, isFavorite, onClose, onToggleFavorite }: D
   /** ブランドに応じたアクセントカラー */
   const accentColor = studio.brand ? BRAND_COLORS[studio.brand] : "#9ca3af";
 
-  /** アップロード済みのスタジオ写真URL（アップロード直後の即時反映用にローカルで保持） */
-  const [imageUrl, setImageUrl] = useState(studio.imageUrl);
-  /** アップロード中フラグ */
-  const [uploading, setUploading] = useState(false);
-  /** アップロード失敗時のエラーメッセージ（サイズ超過など） */
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  /** ヒーロー画像。studio.imageUrl（旧Google Places由来）が無ければ、
+   * スクレイピング済みの部屋写真のうち最初に見つかったものをフォールバックとして使う */
+  const heroImageUrl =
+    studio.imageUrl ?? studio.rooms?.find((r) => r.photoUrls && r.photoUrls.length > 0)?.photoUrls?.[0];
 
   // 詳細モーダルが開かれた（=スタジオ詳細を表示した）タイミングで計測する。
   useEffect(() => {
@@ -64,31 +61,6 @@ export const DetailModal = ({ studio, isFavorite, onClose, onToggleFavorite }: D
     window.open(url, "_blank");
   };
 
-  /**
-   * 選択された画像ファイルをS3へアップロードし、スタジオの写真として設定する。
-   * 署名付きフォーム発行 → S3へ直接POST → Studiosテーブルのimageurlを更新、の順に行う。
-   *
-   * @param {React.ChangeEvent<HTMLInputElement>} e - ファイル選択イベント
-   */
-  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setUploading(true);
-    setUploadError(null);
-    try {
-      const { uploadUrl, uploadFields, publicUrl } = await getPresignedUploadUrl(file.type);
-      await uploadImageToS3(uploadUrl, uploadFields, file);
-      await updateStudioImage(studio.studioId, publicUrl);
-      setImageUrl(publicUrl);
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "アップロードに失敗しました");
-    } finally {
-      setUploading(false);
-      e.target.value = "";
-    }
-  };
-
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
@@ -98,7 +70,7 @@ export const DetailModal = ({ studio, isFavorite, onClose, onToggleFavorite }: D
 
         {/* ヒーローセクション: スタジオ名とブランドを表示 */}
         <div className="modal-hero" style={{ borderBottom: `3px solid ${accentColor}` }}>
-          <ImagePreviewPopover imageUrl={imageUrl}>
+          <ImagePreviewPopover imageUrl={heroImageUrl}>
             <h2 className="modal-title-text">{studio.name}</h2>
           </ImagePreviewPopover>
           {studio.brand && (
@@ -131,19 +103,36 @@ export const DetailModal = ({ studio, isFavorite, onClose, onToggleFavorite }: D
                       {room.secondDimensionLabel && room.secondDimensionM != null &&
                         ` / ${room.secondDimensionLabel} ${room.secondDimensionM}m`}
                     </span>
-                    <span className="price-plan-yen">
-                      {room.minPriceYen != null ? `¥${room.minPriceYen.toLocaleString()}〜/時間` : "問合せ"}
-                    </span>
+                    {room.minPriceYen != null ? (
+                      <span className="price-plan-yen">¥{room.minPriceYen.toLocaleString()}〜/時間</span>
+                    ) : room.reserveUrl ? (
+                      <a
+                        href={room.reserveUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="price-plan-yen price-plan-inquiry-link"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        公式サイトで確認
+                      </a>
+                    ) : (
+                      <span className="price-plan-yen">問合せ</span>
+                    )}
                   </div>
 
-                  {/* 部屋写真・平面図（取得できているブランドのみ表示） */}
+                  {/* 部屋写真・平面図（取得できているブランドのみ表示）。
+                      ホバー（PC）/長押し（スマホ）で拡大プレビューできる */}
                   {((room.photoUrls && room.photoUrls.length > 0) || room.floorPlanUrl) && (
                     <div className="room-photo-strip">
                       {room.photoUrls?.slice(0, 4).map((url) => (
-                        <img key={url} src={url} alt={`${room.roomName}の写真`} className="room-photo-thumb" />
+                        <ImagePreviewPopover key={url} imageUrl={url}>
+                          <img src={url} alt={`${room.roomName}の写真`} className="room-photo-thumb" />
+                        </ImagePreviewPopover>
                       ))}
                       {room.floorPlanUrl && (
-                        <img src={room.floorPlanUrl} alt={`${room.roomName}の平面図`} className="room-photo-thumb room-floorplan-thumb" />
+                        <ImagePreviewPopover imageUrl={room.floorPlanUrl}>
+                          <img src={room.floorPlanUrl} alt={`${room.roomName}の平面図`} className="room-photo-thumb room-floorplan-thumb" />
+                        </ImagePreviewPopover>
                       )}
                     </div>
                   )}
@@ -215,27 +204,12 @@ export const DetailModal = ({ studio, isFavorite, onClose, onToggleFavorite }: D
             {isFavorite ? "保存済み" : "お気に入りに追加"}
           </button>
 
-          {/* スタジオ写真の設定: 選択したファイルをS3へアップロードしてスタジオに紐付ける */}
-          <button className="btn-nav" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-            <Camera size={16} />
-            {uploading ? "アップロード中..." : imageUrl ? "写真を変更" : "スタジオ写真を設定"}
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            style={{ display: "none" }}
-            onChange={handlePhotoSelect}
-          />
-
           {/* このスタジオのレビュー一覧へ */}
           <Link to={`/posts?studioId=${studio.studioId}`} className="btn-nav">
             <MessageSquare size={16} />
             このスタジオのレビューを見る
           </Link>
         </div>
-
-        {uploadError && <div className="error-banner">{uploadError}</div>}
       </div>
     </div>
   );
