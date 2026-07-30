@@ -115,9 +115,7 @@ export const DetailModal = ({ studio, isFavorite, onClose, onToggleFavorite }: D
                       >
                         公式サイトで確認
                       </a>
-                    ) : (
-                      <span className="price-plan-yen">問合せ</span>
-                    )}
+                    ) : null}
                   </div>
 
                   {/* 部屋写真・平面図（取得できているブランドのみ表示）。

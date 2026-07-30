@@ -74,11 +74,19 @@ BUZZ_SHOP_META = {
 }
 
 # worcle各店舗の住所・緯度経度。BUZZ同様、手動登録データ（概算値）。
+# https://www.studioworcle.com/ トップページのリンク一覧から23区内の稼働店舗を再調査して追加
+# （yoyogi_ug＝代々木地下は準備中ページのため対象外、yokohama/yokohama-openは23区外のため対象外）。
 WORCLE_SHOP_META = {
     "shibuya": {"name": "studio worcle 渋谷", "address": "東京都渋谷区渋谷", "lat": 35.6595, "lng": 139.7005},
     "yoyogi": {"name": "studio worcle 代々木", "address": "東京都渋谷区代々木", "lat": 35.6832, "lng": 139.7021},
     "gyoen": {"name": "studio worcle 新宿御苑", "address": "東京都新宿区新宿", "lat": 35.6875, "lng": 139.7100},
     "okubo": {"name": "studio worcle 大久保", "address": "東京都新宿区大久保", "lat": 35.7005, "lng": 139.7005},
+    "baba": {"name": "studio worcle 高田馬場", "address": "東京都新宿区高田馬場", "lat": 35.7126, "lng": 139.7038},
+    "harajuku": {"name": "studio worcle 原宿", "address": "東京都渋谷区神宮前", "lat": 35.6702, "lng": 139.7027},
+    "ichigaya": {"name": "studio worcle 市ヶ谷", "address": "東京都新宿区市谷", "lat": 35.6935, "lng": 139.7357},
+    "ikebukuro": {"name": "studio worcle 池袋", "address": "東京都豊島区池袋", "lat": 35.7295, "lng": 139.7109},
+    "ikejiri-ohashi": {"name": "studio worcle 池尻大橋", "address": "東京都世田谷区池尻", "lat": 35.6499, "lng": 139.6858},
+    "shinjuku": {"name": "studio worcle 新宿", "address": "東京都新宿区新宿", "lat": 35.6938, "lng": 139.7036},
 }
 
 # worcleのスケジュール表は「部屋固有の識別色」でセルを塗り、その色が付いている=予約済み、
@@ -525,8 +533,48 @@ def scrape_worcle(shop: str, date: str) -> dict:
     }
 
 
+def fetch_noah_price_list(branch_id: str) -> dict[str, int]:
+    """店舗の全部屋の最安時間料金（円/時間目安）を取得する。
+
+    認証不要のJSON API（GET /noahweb/StudioPrice/loadPriceList?branch_id=...）を
+    直接叩く。DAY TIME（regular_prices の price_label="day"）の料金を
+    「1時間あたりの目安料金」として採用する（実際の課金単位が30分刻みの
+    可能性はあるが、目安表示としては十分）。
+
+    Args:
+        branch_id (str): NOAHのbranch_id
+
+    Returns:
+        dict[str, int]: {studio_id(str): price_val(int)} の辞書。取得できない部屋は含まない
+    """
+    try:
+        data = requests.get(
+            "https://www.studionoah.jp/noahweb/StudioPrice/loadPriceList",
+            params={"branch_id": branch_id},
+            headers={"User-Agent": USER_AGENT},
+            timeout=15,
+        ).json()
+    except Exception:
+        return {}
+    if data.get("type") != "success":
+        return {}
+
+    prices = {}
+    for studio_id, item in data.get("items", {}).items():
+        day_price = next(
+            (p["price_val"] for p in item.get("regular_prices", []) if p.get("price_label") == "day"),
+            None,
+        )
+        if day_price:
+            try:
+                prices[studio_id] = int(day_price)
+            except (TypeError, ValueError):
+                pass
+    return prices
+
+
 def fetch_noah_rooms(shop: str) -> list[dict]:
-    """店舗の全部屋情報（studio_id・部屋名・広さ）を取得する。
+    """店舗の全部屋情報（studio_id・部屋名・広さ・料金）を取得する。
 
     認証不要のJSON API（GET /noahweb/Chart/studios?b[]={branch_id}）を直接叩く。
 
@@ -546,6 +594,8 @@ def fetch_noah_rooms(shop: str) -> list[dict]:
     if data.get("type") != "success" or not data.get("branches"):
         raise ValueError(f"NOAH部屋一覧の取得に失敗しました: shop={shop}")
 
+    price_by_studio_id = fetch_noah_price_list(branch_id)
+
     rooms = []
     for branch in data["branches"]:
         for s in branch.get("studios", []):
@@ -556,6 +606,7 @@ def fetch_noah_rooms(shop: str) -> list[dict]:
                 "room_name": s["studio_name"],
                 # sizeは「畳」単位。㎡換算は1畳=約1.62㎡（江戸間目安）で近似する
                 "area_tatami": s.get("size"),
+                "min_price_yen": price_by_studio_id.get(str(s["studio_id"])),
                 "photo_url": s.get("image_path"),
                 "reserve_url": s.get("detail_path"),
             })
@@ -662,7 +713,7 @@ def scrape_noah(shop: str, date: str, with_detail: bool = False) -> dict:
             "areaSqm": area_sqm,
             "secondDimensionLabel": "畳数" if room.get("area_tatami") else None,
             "secondDimensionM": room.get("area_tatami"),
-            "minPriceYen": None,
+            "minPriceYen": room.get("min_price_yen"),
             "photoUrls": [room["photo_url"]] if room.get("photo_url") else None,
             "reserveUrl": room.get("reserve_url"),
             "equipment": equipment,

@@ -169,7 +169,7 @@ export const StudiosPage = () => {
                                   ? `${room.secondDimensionLabel} ${room.secondDimensionM}m`
                                   : "-"}
                               </td>
-                              <td>{room.minPriceYen != null ? `¥${room.minPriceYen.toLocaleString()}〜` : "問合せ"}</td>
+                              <td>{room.minPriceYen != null ? `¥${room.minPriceYen.toLocaleString()}〜` : "-"}</td>
                             </tr>
                           ))}
                         </tbody>
