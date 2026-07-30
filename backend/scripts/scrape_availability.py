@@ -123,10 +123,38 @@ NOAH_SHOP_META = {
 
 # スタジオミッションは渋谷の単一店舗（秀永道玄坂ビル）に23部屋を持つ構成。
 # 予約システム（resv.studio-mission.com）が会員ログイン必須のため、
-# backend/.env の MISSION_LOGIN_EMAIL / MISSION_LOGIN_PASSWORD を使ってログインする。
+# backend/.env の MISSION_LOGIN_EMAIL / MISSION_LOGIN_PASSWORD を使ってログインする
+# （Lambda実行時はSSM Parameter Storeから取得する。_get_mission_credentials参照）。
 MISSION_SHOP_META = {
     "shibuya": {"name": "スタジオミッション", "address": "東京都渋谷区道玄坂", "lat": 35.6580, "lng": 139.6982},
 }
+
+MISSION_LOGIN_EMAIL_SSM_PARAM = "/studio-search/mission-login-email"
+MISSION_LOGIN_PASSWORD_SSM_PARAM = "/studio-search/mission-login-password"
+
+
+def _get_mission_credentials() -> tuple[str | None, str | None]:
+    """スタジオミッションのログイン情報を取得する。
+
+    ローカル実行（backend/.env）を優先し、無ければLambda実行を想定して
+    SSM Parameter Storeから取得する。
+
+    Returns:
+        tuple[str | None, str | None]: (email, password)。どちらも取得できなければNone
+    """
+    email = os.environ.get("MISSION_LOGIN_EMAIL")
+    password = os.environ.get("MISSION_LOGIN_PASSWORD")
+    if email and password:
+        return email, password
+
+    try:
+        import boto3
+        ssm = boto3.client("ssm", region_name=AWS_REGION)
+        email = ssm.get_parameter(Name=MISSION_LOGIN_EMAIL_SSM_PARAM, WithDecryption=True)["Parameter"]["Value"]
+        password = ssm.get_parameter(Name=MISSION_LOGIN_PASSWORD_SSM_PARAM, WithDecryption=True)["Parameter"]["Value"]
+        return email, password
+    except Exception:
+        return None, None
 
 
 @dataclass
@@ -332,8 +360,10 @@ def scrape_buzz(shop: str, date: str, with_detail: bool = False) -> dict:
         "brand": "buzz",
         "shop": shop,
         "date": date,
-        "sourceUrl": f"https://buzz-st.com/{shop}/{date}",
+        # sourceUrlは店舗トップページ（日付を含まない）。日付付きURLをstudio-studios
+        # マスタに焼き付けると日が経つほどリンク先が過去日付のままになってしまうため。
         "rooms": result_rooms,
+        "sourceUrl": f"https://buzz-st.com/{shop}",
     }
 
 
@@ -787,12 +817,12 @@ def scrape_mission(shop: str, date: str) -> dict:
     """
     from playwright.sync_api import sync_playwright
 
-    email = os.environ.get("MISSION_LOGIN_EMAIL")
-    password = os.environ.get("MISSION_LOGIN_PASSWORD")
+    email, password = _get_mission_credentials()
     if not email or not password:
         raise ValueError(
-            "MISSION_LOGIN_EMAIL / MISSION_LOGIN_PASSWORD が設定されていません。"
-            "backend/.env.example を参考に backend/.env を作成してください。"
+            "MISSION_LOGIN_EMAIL / MISSION_LOGIN_PASSWORD が取得できません。"
+            "ローカル実行時は backend/.env.example を参考に backend/.env を作成するか、"
+            "SSMパラメータ /studio-search/mission-login-email / -password を設定してください。"
         )
 
     room_meta = {r["room_name"]: r for r in fetch_mission_rooms()}
@@ -951,6 +981,91 @@ SHOP_META_BY_BRAND = {
 }
 
 
+def run_scrape_batch(
+    brand: str, shops: list[str], dates: list[str],
+    with_detail: bool = False, push_to_dynamo_flag: bool = True,
+    sleep_sec: float = 0.5,
+) -> dict:
+    """指定ブランド・店舗・日付の組み合わせを全てスクレイピングする共通バッチ処理。
+
+    ローカルCLI（main()）とLambdaハンドラ（handler()）の両方から呼ばれる。
+
+    Args:
+        brand (str): "buzz" | "worcle" | "noah" | "mission"
+        shops (list[str]): 対象店舗slugのリスト
+        dates (list[str]): 対象日付（YYYY-MM-DD）のリスト
+        with_detail (bool): Trueならbuzz/noahで部屋詳細（写真・設備等）も取得する
+        push_to_dynamo_flag (bool): Trueなら結果をDynamoDBに書き込む
+        sleep_sec (float): 各リクエスト間の待機秒数（サーバー負荷対策）
+
+    Returns:
+        dict: {"total": int, "succeeded": int, "failed": list[dict]}
+            failedは {"shop": str, "date": str, "error": str} のリスト
+    """
+    scrape_fn = SCRAPE_FUNCTIONS[brand]
+    total = len(shops) * len(dates)
+    succeeded = 0
+    failed = []
+
+    done = 0
+    for shop in shops:
+        for date in dates:
+            done += 1
+            print(f"[{done}/{total}] {brand} {shop} {date}")
+            try:
+                if with_detail and brand in ("buzz", "noah"):
+                    result = scrape_fn(shop, date, with_detail=True)
+                else:
+                    result = scrape_fn(shop, date)
+            except Exception as e:
+                print(f"  エラー: {e}", file=sys.stderr)
+                failed.append({"shop": shop, "date": date, "error": str(e)})
+                continue
+
+            if push_to_dynamo_flag:
+                push_to_dynamo(result)
+            succeeded += 1
+
+            if total > 1 and sleep_sec > 0:
+                time.sleep(sleep_sec)  # サーバー負荷を避けるための小休止
+
+    return {"total": total, "succeeded": succeeded, "failed": failed}
+
+
+def handler(event: dict, context: object) -> dict:
+    """EventBridgeスケジュールから定期実行されるLambdaハンドラ。
+
+    4ブランド全店舗について、今日から DAYS_AHEAD 日分の空き状況を再取得し
+    DynamoDBへ反映する。1回の実行で全ブランド・全日程を処理するため、
+    Lambdaのタイムアウトを長め（15分上限いっぱい）に設定して呼び出すこと。
+
+    Args:
+        event (dict): EventBridgeのイベント（内容は使用しない）
+        context (object): Lambdaコンテキスト（使用しない）
+
+    Returns:
+        dict: ブランドごとの実行結果サマリー
+    """
+    days_ahead = int(os.environ.get("SCRAPE_DAYS_AHEAD", "60"))
+    dates = daterange_from_today(days_ahead)
+
+    summary = {}
+    for brand, shop_meta in SHOP_META_BY_BRAND.items():
+        print(f"=== {brand} ===")
+        result = run_scrape_batch(
+            brand=brand,
+            shops=list(shop_meta.keys()),
+            dates=dates,
+            with_detail=False,
+            push_to_dynamo_flag=True,
+            sleep_sec=0.3,
+        )
+        summary[brand] = result
+        print(f"{brand}: succeeded={result['succeeded']}/{result['total']} failed={len(result['failed'])}")
+
+    return summary
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="レンタルスタジオ空き状況スクレイパー（ローカル専用）")
     parser.add_argument("--brand", required=True, choices=["buzz", "worcle", "noah", "mission"], help="対象ブランド")
@@ -973,42 +1088,32 @@ def main() -> None:
         print("--date または --days-ahead のいずれかを指定してください", file=sys.stderr)
         sys.exit(1)
 
-    scrape_fn = SCRAPE_FUNCTIONS[args.brand]
     shop_meta = SHOP_META_BY_BRAND[args.brand]
     shops = list(shop_meta.keys()) if args.all_shops else [args.shop]
     dates = daterange_from_today(args.days_ahead) if args.days_ahead else [args.date]
 
-    total = len(shops) * len(dates)
-    done = 0
-    for shop in shops:
-        for date in dates:
-            done += 1
-            print(f"[{done}/{total}] {shop} {date}")
-            try:
-                if args.with_detail and args.brand in ("buzz", "noah"):
-                    result = scrape_fn(shop, date, with_detail=True)
-                else:
-                    result = scrape_fn(shop, date)
-            except Exception as e:
-                print(f"  エラー: {e}", file=sys.stderr)
-                continue
+    if args.json and len(shops) == 1 and len(dates) == 1 and not args.push_to_dynamo:
+        # 単発デバッグ用: DynamoDBに書かずJSONファイルへ保存する
+        scrape_fn = SCRAPE_FUNCTIONS[args.brand]
+        result = scrape_fn(shops[0], dates[0], with_detail=args.with_detail) if (
+            args.with_detail and args.brand in ("buzz", "noah")
+        ) else scrape_fn(shops[0], dates[0])
+        with open(args.json, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        print(f"Saved to {args.json}")
+        return
 
-            if args.push_to_dynamo:
-                push_to_dynamo(result)
+    result = run_scrape_batch(
+        brand=args.brand, shops=shops, dates=dates,
+        with_detail=args.with_detail, push_to_dynamo_flag=args.push_to_dynamo,
+    )
 
-            if args.json and len(shops) == 1 and len(dates) == 1:
-                with open(args.json, "w", encoding="utf-8") as f:
-                    json.dump(result, f, ensure_ascii=False, indent=2)
-                print(f"Saved to {args.json}")
-            elif not args.push_to_dynamo:
-                for room in result["rooms"]:
-                    available_slots = [s["time"] for s in room["slots"] if s["available"]]
-                    label = room["secondDimensionLabel"] or "?"
-                    print(f"  [{room['roomName']}] {room['areaSqm']}㎡ / {label}{room['secondDimensionM']}m / {room['minPriceYen']}円〜")
-                    print(f"    空き: {', '.join(available_slots) if available_slots else 'なし'}")
-
-            if total > 1:
-                time.sleep(0.5)  # サーバー負荷を避けるための小休止
+    if not args.push_to_dynamo:
+        print(f"完了: {result['succeeded']}/{result['total']} 件成功")
+        if result["failed"]:
+            print(f"失敗: {len(result['failed'])}件")
+            for f in result["failed"]:
+                print(f"  {f['shop']} {f['date']}: {f['error']}")
 
 
 if __name__ == "__main__":
