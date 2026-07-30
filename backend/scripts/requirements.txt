@@ -1,0 +1,7 @@
+# scrape_availability.py の実行に必要な依存パッケージ。
+# ECS Fargateタスク用Dockerイメージのビルドに使用する（infrastructure/scraper.Dockerfile参照）。
+requests
+beautifulsoup4
+python-dotenv
+playwright
+boto3

@@ -25,6 +25,22 @@ Transform: AWS::Serverless-2016-10-31
 Description: Studio Search App - Serverless Backend
 
 # ==============================================================
+# パラメータ
+# ==============================================================
+Parameters:
+  # ECS Fargateスケジュールタスク（空き状況スクレイピング）の実行先ネットワーク。
+  # 専用VPCは構築せず、アカウントのデフォルトVPC・デフォルトサブネットを使う
+  # （アウトバウンドのみのスクレイピング用途のため、これで十分）。
+  # デプロイ時に実際のデフォルトVPC/サブネットIDを指定すること
+  # （aws ec2 describe-vpcs --filters Name=is-default,Values=true で確認できる）。
+  DefaultVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: "スクレイピングタスクを実行するVPC（通常はデフォルトVPC）"
+  DefaultSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: "スクレイピングタスクを実行するサブネット（パブリックサブネット、通常はデフォルトVPCの全サブネット）"
+
+# ==============================================================
 # グローバル設定
 # ==============================================================
 Globals:
@@ -738,6 +754,176 @@ Resources:
           Properties:
             Schedule: cron(30 21 * * ? *)
             Enabled: true
+
+  # ==============================================================
+  # 空き状況スクレイピング定期実行（ECS Fargate スケジュールタスク）
+  #
+  # backend/scripts/scrape_availability.py（4ブランド分をまとめて処理するhandler()）を
+  # Playwright/Chromium入りのコンテナイメージとしてECS Fargateで毎日1回実行する。
+  # Lambdaではなく Fargate を採用している理由:
+  #   - 4ブランド全店舗×60日分の再取得はLambdaの15分実行時間上限を超える可能性がある
+  #   - worcle/スタジオミッションはPlaywrightでのブラウザ操作が必須で、
+  #     コンテナイメージが大きくなりがち（Lambdaのイメージサイズ上限は10GB、
+  #     Fargateなら実質的な制約が緩い）
+  #
+  # コンテナイメージは infrastructure/scraper.Dockerfile からローカルでビルドし、
+  # 手動でECRへpushする（このスタックはECRリポジトリの器だけを用意する。
+  # SAM/CloudFormationからのコンテナビルドはできないため）。
+  # ==============================================================
+
+  ScraperEcrRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: studio-search-scraper
+      # コスト・整理のため、最新5世代のみ保持し古いイメージは自動削除する
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [{
+              "rulePriority": 1,
+              "description": "Keep only the last 5 images",
+              "selection": { "tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 5 },
+              "action": { "type": "expire" }
+            }]
+          }
+
+  ScraperCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: studio-search-scraper-cluster
+
+  # Fargateタスク実行ロール（ECRからのイメージ取得・CloudWatch Logsへの出力に必要）
+  ScraperTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  # タスク本体（scrape_availability.py）が使うロール。
+  # DynamoDB（Studios/Availability）への読み書きとSSM（ミッションのログイン情報）読み取りが必要
+  ScraperTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ScraperTaskPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt StudiosTable.Arn
+                  - !GetAtt AvailabilityTable.Arn
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/studio-search/mission-login-email"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/studio-search/mission-login-password"
+
+  ScraperLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/studio-search-scraper
+      RetentionInDays: 14
+
+  # コンテナイメージはinfrastructure/scraper.Dockerfileからローカルビルド・手動pushする前提のため、
+  # タスク定義のImageは初回デプロイ時点でダミー値（:latest）を指す。
+  # pushしたイメージがある状態で `aws ecs update-service` 等は不要（スケジュールタスクは
+  # 実行のたびに最新のタスク定義を参照するため、次回実行から新イメージが使われる）
+  ScraperTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: studio-search-scraper
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "1024"
+      Memory: "3072"
+      ExecutionRoleArn: !GetAtt ScraperTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ScraperTaskRole.Arn
+      ContainerDefinitions:
+        - Name: scraper
+          Image: !Sub "${ScraperEcrRepository.RepositoryUri}:latest"
+          Environment:
+            - { Name: SCRAPE_DAYS_AHEAD, Value: "60" }
+            - { Name: AWS_REGION, Value: !Ref "AWS::Region" }
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ScraperLogGroup
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: scraper
+
+  # デフォルトVPC内で実行する（専用VPC構築はコスト・複雑さに見合わないため）
+  ScraperSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: studio-search-scraper task security group (outbound only)
+      VpcId: !Ref DefaultVpcId
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+
+  # EventBridge SchedulerがECS RunTaskを呼び出すためのロール
+  ScraperSchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: scheduler.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ScraperSchedulerPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Ref ScraperTaskDefinition
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !GetAtt ScraperTaskExecutionRole.Arn
+                  - !GetAtt ScraperTaskRole.Arn
+
+  # 毎日 AM6:00 JST（UTC 21:00）に4ブランド全店舗の空き状況を再取得する。
+  # 前日実行分のスコア計算バッチ（廃止済み）と同じ時刻帯を踏襲
+  ScraperSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: studio-search-scraper-daily
+      ScheduleExpression: cron(0 21 * * ? *)
+      ScheduleExpressionTimezone: UTC
+      FlexibleTimeWindow: { Mode: "OFF" }
+      Target:
+        Arn: !GetAtt ScraperCluster.Arn
+        RoleArn: !GetAtt ScraperSchedulerRole.Arn
+        EcsParameters:
+          TaskDefinitionArn: !Ref ScraperTaskDefinition
+          LaunchType: FARGATE
+          NetworkConfiguration:
+            AwsvpcConfiguration:
+              Subnets: !Ref DefaultSubnetIds
+              SecurityGroups: [!Ref ScraperSecurityGroup]
+              AssignPublicIp: ENABLED
 
   # ==============================================================
   # AWS利用料アラート（月$10、80%/100%到達時にメール通知）
