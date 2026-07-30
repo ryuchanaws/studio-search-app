@@ -2,15 +2,15 @@
  * @fileoverview スタジオ地図画面。
  *
  * Google Maps 上に全スタジオをマーカーで表示する。
- * マーカーの色はスコアに応じて変化し、タップすると
- * スタジオ名・スコア・設備・ナビボタンを含む InfoWindow を表示する。
+ * マーカーの色はブランド（BUZZ / worcle / NOAH / スタジオミッション）に応じて変化し、
+ * タップするとスタジオ名・ブランド・住所・ナビボタンを含む InfoWindow を表示する。
  */
 
 import { useState, useEffect } from "react";
 import { APIProvider, Map, AdvancedMarker, Pin, InfoWindow } from "@vis.gl/react-google-maps";
-import { getStudios, getRecommendations } from "../api/client";
-import type { Studio, Recommendation } from "../types";
-import { getScoreColor } from "../utils/score";
+import { getStudios } from "../api/client";
+import type { Studio } from "../types";
+import { BRAND_LABELS, BRAND_COLORS } from "../utils/brand";
 import { Navigation2 } from "lucide-react";
 
 /** Google Maps API キー（環境変数から取得。未設定の場合は空文字） */
@@ -22,24 +22,18 @@ const DEFAULT_CENTER = { lat: 35.6812, lng: 139.7671 };
 /**
  * スタジオ地図ページコンポーネント。
  *
- * - マウント時に studios・recommendations を並列取得して地図に反映する
- * - スコアに応じてマーカーの色を変える（高スコア: 緑 / 低スコア: 赤）
+ * - マウント時に studios を取得して地図に反映する
+ * - ブランドに応じてマーカーの色を変える
  * - マーカークリックで InfoWindow を表示し、ナビボタンから Google Maps に遷移できる
  *
  * @returns {JSX.Element} スタジオ地図画面
  */
 export const MapPage = () => {
   const [studios, setStudios] = useState<Studio[]>([]);
-  const [recMap, setRecMap] = useState<Record<string, Recommendation>>({});
   const [selected, setSelected] = useState<Studio | null>(null);
 
   useEffect(() => {
-    Promise.all([getStudios(), getRecommendations()]).then(([s, r]) => {
-      setStudios(s);
-      const m: Record<string, Recommendation> = {};
-      r.forEach((rec) => (m[rec.studioId] = rec));
-      setRecMap(m);
-    });
+    getStudios().then(setStudios);
   }, []);
 
   /**
@@ -70,8 +64,7 @@ export const MapPage = () => {
             style={{ width: "100%", height: "100%" }}
           >
             {studios.map((studio) => {
-              const rec = recMap[studio.studioId];
-              const color = rec ? getScoreColor(rec.score) : "#6b7280";
+              const color = studio.brand ? BRAND_COLORS[studio.brand] : "#6b7280";
               return (
                 <AdvancedMarker
                   key={studio.studioId}
@@ -90,15 +83,11 @@ export const MapPage = () => {
               >
                 <div className="map-info">
                   <strong>{selected.name}</strong>
-                  {recMap[selected.studioId] && (
-                    <>
-                      <p className="map-info-score">
-                        スコア: {Math.round(recMap[selected.studioId].score)}
-                      </p>
-                      <p className="map-info-fish">
-                        {recMap[selected.studioId].facilityTags.join(" / ")}
-                      </p>
-                    </>
+                  {selected.brand && (
+                    <p className="map-info-score">{BRAND_LABELS[selected.brand]}</p>
+                  )}
+                  {(selected.address ?? selected.description) && (
+                    <p className="map-info-fish">{selected.address ?? selected.description}</p>
                   )}
                   <button className="map-nav-btn" onClick={() => openNav(selected)}>
                     <Navigation2 size={13} /> ナビ開始

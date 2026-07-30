@@ -21,3 +21,4 @@ frontend/.env
 .env
 # backfill_studio_details.py 実行時の一時ログ
 backend/scripts/*.log
+backend/tmp_debug/

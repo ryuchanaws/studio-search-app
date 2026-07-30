@@ -2,22 +2,22 @@
  * @fileoverview お気に入りスタジオ一覧画面。
  *
  * ユーザーがハートボタンで保存したスタジオを一覧表示する。
- * おすすめデータと突き合わせてスコア・AI コメント付きで表示し、
+ * 全スタジオデータと突き合わせてブランド・住所付きで表示し、
  * カードタップで詳細モーダルを開くことができる。
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useFavorites } from "../hooks/useFavorites";
-import { useRecommendations } from "../hooks/useRecommendations";
-import { RecommendationCard } from "../components/RecommendationCard";
+import { getStudios } from "../api/client";
+import { StudioCard } from "../components/StudioCard";
 import { DetailModal } from "../components/DetailModal";
-import type { Recommendation } from "../types";
+import type { Studio } from "../types";
 import { Heart } from "lucide-react";
 
 /**
  * お気に入りスタジオ一覧ページコンポーネント。
  *
- * - お気に入り登録済みのスタジオIDと recommendations を突き合わせて表示する
+ * - お気に入り登録済みのスタジオIDと全スタジオ一覧を突き合わせて表示する
  * - お気に入りが0件の場合は空状態のガイドメッセージを表示する
  * - カードをタップすると DetailModal が開く
  *
@@ -25,10 +25,14 @@ import { Heart } from "lucide-react";
  */
 export const FavoritesPage = () => {
   const { favorites, loading, toggleFavorite, isFavorite } = useFavorites();
-  const { recommendations } = useRecommendations();
-  const [selected, setSelected] = useState<Recommendation | null>(null);
+  const [studios, setStudios] = useState<Studio[]>([]);
+  const [selected, setSelected] = useState<Studio | null>(null);
 
-  const favRecs = recommendations.filter((r) => isFavorite(r.studioId));
+  useEffect(() => {
+    getStudios().then(setStudios);
+  }, []);
+
+  const favStudios = studios.filter((s) => isFavorite(s.studioId));
 
   if (loading) return <div className="loading-state"><div className="loader" /><p>読み込み中...</p></div>;
 
@@ -42,18 +46,18 @@ export const FavoritesPage = () => {
         <p className="page-sub">{favorites.length} 件</p>
       </div>
 
-      {favRecs.length === 0 ? (
+      {favStudios.length === 0 ? (
         <div className="empty-state">
           <Heart size={48} style={{ color: "#d1d5db", marginBottom: 12 }} />
           <p>まだ保存されたスタジオがありません</p>
-          <p className="empty-hint">おすすめ画面からハートをタップして保存しましょう</p>
+          <p className="empty-hint">スタジオ一覧画面からハートをタップして保存しましょう</p>
         </div>
       ) : (
         <div className="rec-list">
-          {favRecs.map((rec) => (
-            <RecommendationCard
-              key={rec.studioId}
-              recommendation={rec}
+          {favStudios.map((studio) => (
+            <StudioCard
+              key={studio.studioId}
+              studio={studio}
               isFavorite={true}
               onToggleFavorite={toggleFavorite}
               onClick={setSelected}
@@ -64,7 +68,7 @@ export const FavoritesPage = () => {
 
       {selected && (
         <DetailModal
-          recommendation={selected}
+          studio={selected}
           isFavorite={isFavorite(selected.studioId)}
           onClose={() => setSelected(null)}
           onToggleFavorite={toggleFavorite}

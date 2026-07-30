@@ -20,6 +20,7 @@ import {
   LogIn,
   LogOut,
   UserCircle,
+  Sparkles,
 } from "lucide-react";
 import { cognitoSignOut } from "../auth/authConfig";
 import { useProfile } from "../hooks/useProfile";
@@ -92,6 +93,12 @@ export const NavBar = () => {
       <NavLink to="/favorites" className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}>
         <Heart size={18} />
         <span>保存済み</span>
+      </NavLink>
+
+      {/* イベント登録・おすすめページ */}
+      <NavLink to="/events" className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}>
+        <Sparkles size={18} />
+        <span>イベント</span>
       </NavLink>
 
       {/* レビュー投稿ページ */}

@@ -15,6 +15,7 @@ import { TopPage } from "./pages/TopPage";
 import { MapPage } from "./pages/MapPage";
 import { StudiosPage } from "./pages/StudiosPage";
 import { FavoritesPage } from "./pages/FavoritesPage";
+import { EventsPage } from "./pages/EventsPage";
 import { PostsPage } from "./pages/PostsPage";
 import { ChatPage } from "./pages/ChatPage";
 import { GuidePage } from "./pages/GuidePage";
@@ -43,14 +44,16 @@ export default function App() {
           <NavBar />
           <main className="main-content">
             <Routes>
-              {/* / : おすすめTOP3・AI実行ボタン */}
+              {/* / : 4ブランドのスタジオ一覧・空き状況探索 */}
               <Route path="/" element={<TopPage />} />
               {/* /map : Google Maps スタジオ地図 */}
               <Route path="/map" element={<MapPage />} />
-              {/* /studios : スタジオ一覧リスト */}
+              {/* /studios : スタジオ×部屋の広さ比較一覧 */}
               <Route path="/studios" element={<StudiosPage />} />
               {/* /favorites : お気に入りスタジオ一覧 */}
               <Route path="/favorites" element={<FavoritesPage />} />
+              {/* /events : イベント登録・おすすめスタジオ表示 */}
+              <Route path="/events" element={<EventsPage />} />
               {/* /posts : レビュー投稿一覧・投稿作成 */}
               <Route path="/posts" element={<PostsPage />} />
               {/* /chat : AIチャット（スタジオ選びの相談） */}

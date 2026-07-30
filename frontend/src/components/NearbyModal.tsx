@@ -1,49 +1,49 @@
 /**
  * @fileoverview 「現在地から探す」モーダルコンポーネント。
  *
- * ブラウザの現在地を取得し、取得済みのおすすめデータを
- * 実際の現在地からの距離で再ランキングして表示するサブ機能。
- * メインのTOP3（基準地点からのおすすめ）はそのままに、
- * こちらは現在地基準の別ランキングとして独立して提供する。
+ * ブラウザの現在地を取得し、取得済みのスタジオ一覧を
+ * 実際の現在地からの距離が近い順に並べ替えて表示するサブ機能。
  * DBへの書き込みは行わず、クライアント側だけで完結する。
  */
 
 import { useEffect, useMemo } from "react";
 import { X, LocateFixed, Loader2 } from "lucide-react";
-import type { Recommendation } from "../types";
+import type { Studio } from "../types";
 import { useGeolocation } from "../hooks/useGeolocation";
 import { haversineKm } from "../utils/distance";
-import { recalcScoreForDistance } from "../utils/score";
-import { RecommendationCard } from "./RecommendationCard";
+import { StudioCard } from "./StudioCard";
 
 /**
  * NearbyModal コンポーネントの Props。
  */
 interface NearbyModalProps {
-  /** 取得済みのおすすめ一覧（現在地基準に再計算する元データ） */
-  recommendations: Recommendation[];
+  /** 取得済みのスタジオ一覧（現在地基準に並べ替える元データ） */
+  studios: Studio[];
   /** お気に入り確認関数 */
   isFavorite: (studioId: string) => boolean;
   /** お気に入りトグル関数 */
   onToggleFavorite: (studioId: string) => void;
   /** カードクリック時に呼び出す関数（詳細モーダルを開く） */
-  onSelect: (rec: Recommendation) => void;
+  onSelect: (studio: Studio) => void;
   /** モーダルを閉じる関数 */
   onClose: () => void;
 }
 
+/** 「現在地から探す」で表示する件数の上限 */
+const NEARBY_LIMIT = 3;
+
 /**
- * 現在地からのおすすめモーダル。
+ * 現在地からのスタジオ探索モーダル。
  *
  * - マウント時に自動で位置情報の取得をリクエストする
  * - 取得できた現在地と各スタジオの緯度経度からhaversine距離を算出し、
- *   recalcScoreForDistance でスコアを近似再計算して上位3件を表示する
+ *   近い順に上位3件を表示する
  * - 拒否/エラー時は案内メッセージを表示する
  *
  * @param {NearbyModalProps} props
- * @returns {JSX.Element} 現在地からのおすすめモーダル
+ * @returns {JSX.Element} 現在地からのスタジオ探索モーダル
  */
-export const NearbyModal = ({ recommendations, isFavorite, onToggleFavorite, onSelect, onClose }: NearbyModalProps) => {
+export const NearbyModal = ({ studios, isFavorite, onToggleFavorite, onSelect, onClose }: NearbyModalProps) => {
   const { position, status, request } = useGeolocation();
 
   /** モーダルを開いたら自動で現在地取得をリクエストする */
@@ -52,20 +52,18 @@ export const NearbyModal = ({ recommendations, isFavorite, onToggleFavorite, onS
   }, [request]);
 
   /**
-   * 現在地からの実距離でスコアを再計算し、上位3件を並べ替える。
-   * studio情報（lat/lng）が無いおすすめは対象外とする。
+   * 現在地からの実距離が近い順にスタジオを並べ替え、上位3件を返す。
    */
   const nearby = useMemo(() => {
     if (!position) return [];
-    return recommendations
-      .filter((rec) => rec.studio?.lat != null && rec.studio?.lng != null)
-      .map((rec) => {
-        const distanceKm = haversineKm(position.lat, position.lng, rec.studio!.lat, rec.studio!.lng);
-        return { ...rec, distance: distanceKm, score: recalcScoreForDistance(rec, distanceKm) };
-      })
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3);
-  }, [position, recommendations]);
+    return studios
+      .map((studio) => ({
+        studio,
+        distanceKm: haversineKm(position.lat, position.lng, studio.lat, studio.lng),
+      }))
+      .sort((a, b) => a.distanceKm - b.distanceKm)
+      .slice(0, NEARBY_LIMIT);
+  }, [position, studios]);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -107,12 +105,13 @@ export const NearbyModal = ({ recommendations, isFavorite, onToggleFavorite, onS
 
           {status === "granted" && nearby.length > 0 && (
             <div className="rec-list">
-              {nearby.map((rec, i) => (
-                <RecommendationCard
-                  key={rec.studioId}
-                  recommendation={rec}
+              {nearby.map(({ studio, distanceKm }, i) => (
+                <StudioCard
+                  key={studio.studioId}
+                  studio={studio}
                   rank={i + 1}
-                  isFavorite={isFavorite(rec.studioId)}
+                  distanceKm={distanceKm}
+                  isFavorite={isFavorite(studio.studioId)}
                   onToggleFavorite={onToggleFavorite}
                   onClick={onSelect}
                 />

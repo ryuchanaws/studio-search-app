@@ -5,8 +5,8 @@
 
 import axios from "axios";
 import type {
-  Recommendation,
   Studio,
+  StudioAvailability,
   Post,
   Favorite,
   BatchStatus,
@@ -14,6 +14,9 @@ import type {
   Chat,
   ChatSummary,
   Profile,
+  StudioEvent,
+  EventPurpose,
+  RecommendedRoom,
 } from "../types";
 
 /**
@@ -54,16 +57,6 @@ api.interceptors.request.use((config) => {
 });
 
 /**
- * おすすめスタジオ一覧を取得する。
- *
- * @returns {Promise<Recommendation[]>} スコア降順のおすすめスタジオリスト
- */
-export const getRecommendations = async (): Promise<Recommendation[]> => {
-  const { data } = await api.get("/recommendations");
-  return data.items ?? data;
-};
-
-/**
  * 全レンタルスタジオ一覧を取得する。
  *
  * @returns {Promise<Studio[]>} 全スタジオリスト
@@ -71,6 +64,25 @@ export const getRecommendations = async (): Promise<Recommendation[]> => {
 export const getStudios = async (): Promise<Studio[]> => {
   const { data } = await api.get("/studios");
   return data.items ?? data;
+};
+
+/**
+ * 指定スタジオの指定日の空き状況を取得する。
+ *
+ * BUZZの11店舗のみ実データを返す。それ以外のブランド（worcle/NOAH/ミッション）は
+ * rooms: [] を返す。また scrapedAt が null の場合はまだスクレイピングされていない
+ * ことを示す（エラーではなく「データ未取得」として扱う）。
+ *
+ * @param {string} studioId - 対象スタジオID
+ * @param {string} date - 対象日（YYYY-MM-DD形式）
+ * @returns {Promise<StudioAvailability>} 部屋ごとの空き状況
+ */
+export const getStudioAvailability = async (
+  studioId: string,
+  date: string
+): Promise<StudioAvailability> => {
+  const { data } = await api.get(`/studios/${studioId}/availability`, { params: { date } });
+  return data;
 };
 
 /**
@@ -136,25 +148,10 @@ export const recordAnalyticsEvent = async (
 };
 
 /**
- * AI バッチ処理を非同期に起動する。
- *
- * POST /admin/run-ai-batch を呼び出し、generateStudioScoreBatch Lambda を
- * 非同期起動する。バッチの完了は待たず、起動を受け付けた時点で即座に返る
- * （API Gateway の29秒タイムアウトを回避するため）。
- * 完了確認は呼び出し側で GET /recommendations をポーリングして行う。
- *
- * @returns {Promise<BatchStatus>} 起動受付結果（status: "started", startedAt を含む）
- */
-export const runAiBatch = async (): Promise<BatchStatus> => {
-  const { data } = await api.post("/admin/run-ai-batch");
-  return data;
-};
-
-/**
  * 現在地周辺の新規スタジオ候補の探索バッチを非同期に起動する。
  *
  * POST /admin/run-studio-discovery を呼び出し、Google Places API を使った
- * 新規スタジオ探索バッチを起動する。runAiBatch 同様、完了は待たずに
+ * 新規スタジオ探索バッチを起動する。完了は待たずに
  * 起動を受け付けた時点で即座に返る。
  *
  * @param {object} position - ユーザーの現在地
@@ -354,4 +351,67 @@ export const updateMyProfile = async (
 ): Promise<{ userId: string; displayName: string }> => {
   const { data } = await api.put("/me", { displayName });
   return data;
+};
+
+/**
+ * ログイン中ユーザーが登録した「次のイベント」一覧を取得する（Cognito認証必須）。
+ *
+ * @returns {Promise<StudioEvent[]>} 更新日時降順のイベント一覧
+ */
+export const getEvents = async (): Promise<StudioEvent[]> => {
+  const { data } = await api.get("/events");
+  return data.items ?? data;
+};
+
+/**
+ * 「次のイベント」を新規登録する（Cognito認証必須）。
+ *
+ * @param {object} input
+ * @param {string} input.title - イベント名（例: "秋公演"）
+ * @param {number} input.stageWidthM - ステージ横幅（メートル）
+ * @param {number} input.stageDepthM - ステージ奥行き（メートル）
+ * @param {number} input.performerCount - 出演人数
+ * @returns {Promise<StudioEvent>} 登録されたイベント
+ */
+export const createEvent = async (input: {
+  title: string;
+  stageWidthM: number;
+  stageDepthM: number;
+  performerCount: number;
+}): Promise<StudioEvent> => {
+  const { data } = await api.post("/events", input);
+  return data.event;
+};
+
+/**
+ * 「次のイベント」を削除する（Cognito認証必須）。
+ *
+ * @param {string} eventId - 削除対象のイベントID
+ * @returns {Promise<void>}
+ */
+export const deleteEvent = async (eventId: string): Promise<void> => {
+  await api.delete(`/events/${eventId}`);
+};
+
+/**
+ * イベント条件（広さ・出演人数）と目的・日付・時間帯から、条件に合う
+ * スタジオ・部屋を絞り込んで取得する（Cognito認証必須）。
+ *
+ * @param {object} input
+ * @param {string} input.eventId - 対象の登録済みイベントID
+ * @param {EventPurpose} input.purpose - "振り入れ" または "構成"
+ * @param {string} input.date - YYYY-MM-DD形式の希望日
+ * @param {string} input.startTime - "HH:MM"形式の希望開始時刻
+ * @param {number} [input.durationMinutes] - 希望利用時間（分、省略時は120分）
+ * @returns {Promise<RecommendedRoom[]>} 条件を満たすスタジオ・部屋の一覧
+ */
+export const getRecommendedStudios = async (input: {
+  eventId: string;
+  purpose: EventPurpose;
+  date: string;
+  startTime: string;
+  durationMinutes?: number;
+}): Promise<RecommendedRoom[]> => {
+  const { data } = await api.get("/recommend-studios", { params: input });
+  return data.items ?? data;
 };

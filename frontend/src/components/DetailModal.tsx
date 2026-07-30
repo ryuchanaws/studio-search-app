@@ -1,25 +1,25 @@
 /**
  * @fileoverview スタジオ詳細モーダルコンポーネント。
  *
- * おすすめカードをタップしたときに表示されるモーダル。
- * AI コメント・設備・各種スコア・距離・費用を表示し、
+ * スタジオカードをタップしたときに表示されるモーダル。
+ * ブランド・住所・部屋一覧を表示し、
  * Google Maps ナビとお気に入りトグルボタンを提供する。
  */
 
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { X, Navigation2, Heart, Sparkles, Star, TrendingUp, TrainFront, Users, Banknote, Camera, MessageSquare, CalendarCheck, Phone } from "lucide-react";
-import type { Recommendation } from "../types";
-import { getScoreColor, getScoreLabel, formatPriceRange } from "../utils/score";
+import { X, Navigation2, Heart, Camera, MessageSquare, CalendarCheck, Phone, Ruler } from "lucide-react";
+import type { Studio } from "../types";
 import { getPresignedUploadUrl, uploadImageToS3, updateStudioImage, recordAnalyticsEvent } from "../api/client";
 import { ImagePreviewPopover } from "./ImagePreviewPopover";
+import { BRAND_LABELS, BRAND_COLORS } from "../utils/brand";
 
 /**
  * DetailModal コンポーネントの Props。
  */
 interface DetailModalProps {
-  /** 詳細表示するおすすめデータ */
-  recommendation: Recommendation;
+  /** 詳細表示するスタジオデータ */
+  studio: Studio;
   /** 現在のお気に入り登録状態 */
   isFavorite: boolean;
   /** モーダルを閉じる関数 */
@@ -32,18 +32,18 @@ interface DetailModalProps {
  * スタジオ詳細モーダルコンポーネント。
  *
  * - バックドロップ（背景）クリックでモーダルを閉じる
- * - スコアに応じた色でヒーローセクションのボーダーを表示する
+ * - ブランドに応じた色でヒーローセクションのボーダーを表示する
  * - お気に入りボタンは登録済みかどうかで表示を切り替える
  *
  * @param {DetailModalProps} props
  * @returns {JSX.Element} スタジオ詳細モーダル
  */
-export const DetailModal = ({ recommendation: rec, isFavorite, onClose, onToggleFavorite }: DetailModalProps) => {
-  /** スコアに応じたアクセントカラー */
-  const scoreColor = getScoreColor(rec.score);
+export const DetailModal = ({ studio, isFavorite, onClose, onToggleFavorite }: DetailModalProps) => {
+  /** ブランドに応じたアクセントカラー */
+  const accentColor = studio.brand ? BRAND_COLORS[studio.brand] : "#9ca3af";
 
   /** アップロード済みのスタジオ写真URL（アップロード直後の即時反映用にローカルで保持） */
-  const [imageUrl, setImageUrl] = useState(rec.studio?.imageUrl);
+  const [imageUrl, setImageUrl] = useState(studio.imageUrl);
   /** アップロード中フラグ */
   const [uploading, setUploading] = useState(false);
   /** アップロード失敗時のエラーメッセージ（サイズ超過など） */
@@ -51,10 +51,8 @@ export const DetailModal = ({ recommendation: rec, isFavorite, onClose, onToggle
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 詳細モーダルが開かれた（=スタジオ詳細を表示した）タイミングで計測する。
-  // 依存配列を空にして初回マウント時のみ発火させる（studioId切り替えでの再マウントも
-  // Reactのkey次第だが、DetailModalは呼び出し側でrec変更時に都度アンマウント/再マウントされる想定）
   useEffect(() => {
-    void recordAnalyticsEvent("view_detail", rec.studioId);
+    void recordAnalyticsEvent("view_detail", studio.studioId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -62,7 +60,7 @@ export const DetailModal = ({ recommendation: rec, isFavorite, onClose, onToggle
    * Google Maps のルート案内を新しいタブで開く。
    */
   const openNav = () => {
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${rec.studio?.lat ?? 0},${rec.studio?.lng ?? 0}`;
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${studio.lat},${studio.lng}`;
     window.open(url, "_blank");
   };
 
@@ -81,7 +79,7 @@ export const DetailModal = ({ recommendation: rec, isFavorite, onClose, onToggle
     try {
       const { uploadUrl, uploadFields, publicUrl } = await getPresignedUploadUrl(file.type);
       await uploadImageToS3(uploadUrl, uploadFields, file);
-      await updateStudioImage(rec.studioId, publicUrl);
+      await updateStudioImage(studio.studioId, publicUrl);
       setImageUrl(publicUrl);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "アップロードに失敗しました");
@@ -98,76 +96,80 @@ export const DetailModal = ({ recommendation: rec, isFavorite, onClose, onToggle
           <X size={20} />
         </button>
 
-        {/* ヒーローセクション: スタジオ名とスコアを大きく表示 */}
-        <div className="modal-hero" style={{ borderBottom: `3px solid ${scoreColor}` }}>
+        {/* ヒーローセクション: スタジオ名とブランドを表示 */}
+        <div className="modal-hero" style={{ borderBottom: `3px solid ${accentColor}` }}>
           <ImagePreviewPopover imageUrl={imageUrl}>
-            <h2 className="modal-title-text">{rec.studio?.name ?? rec.studioId}</h2>
+            <h2 className="modal-title-text">{studio.name}</h2>
           </ImagePreviewPopover>
-          <div className="modal-score" style={{ color: scoreColor }}>
-            <span className="modal-score-num">{Math.round(rec.score)}</span>
-            <span className="modal-score-label">/ 100 — {getScoreLabel(rec.score)}</span>
-          </div>
-        </div>
-
-        {/* AI コメントセクション: Claude API が生成した推薦理由 */}
-        <div className="modal-section">
-          <h3 className="modal-section-title">🤖 AI分析コメント</h3>
-          <p className="modal-reason">{rec.reason}</p>
-        </div>
-
-        {/* 設備セクション */}
-        <div className="modal-section">
-          <h3 className="modal-section-title">設備</h3>
-          <div className="modal-facility-tags">
-            {rec.facilityTags.map((f) => (
-              <span key={f} className="facility-tag large">
-                <Sparkles size={14} />
-                {f}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        {/* 詳細スタッツグリッド: 評価・人気度・最寄り駅距離・収容人数・費用 */}
-        <div className="modal-stats">
-          <div className="stat-item">
-            <Star size={18} />
-            <span className="stat-label">評価スコア</span>
-            <span className="stat-value">{Math.round(rec.ratingScore ?? 0)}</span>
-          </div>
-          <div className="stat-item">
-            <TrendingUp size={18} />
-            <span className="stat-label">人気度スコア</span>
-            <span className="stat-value">{Math.round(rec.popularityScore ?? 0)}</span>
-          </div>
-          <div className="stat-item">
-            <TrainFront size={18} />
-            <span className="stat-label">最寄り駅から</span>
-            <span className="stat-value">
-              {rec.stationDistanceKm != null ? `${Math.round(rec.stationDistanceKm * 1000)}m` : "不明"}
+          {studio.brand && (
+            <span className="brand-badge" style={{ background: accentColor }}>
+              {BRAND_LABELS[studio.brand]}
             </span>
-          </div>
-          <div className="stat-item">
-            <Users size={18} />
-            <span className="stat-label">収容人数目安</span>
-            <span className="stat-value">{rec.capacityCategory ?? "不明"}</span>
-          </div>
-          <div className="stat-item">
-            <Banknote size={18} />
-            <span className="stat-label">費用</span>
-            <span className="stat-value">{formatPriceRange(rec.priceOptions, rec.cost)}</span>
-          </div>
+          )}
         </div>
 
-        {/* 料金プラン一覧: 部屋・時間帯によって複数プランがある場合のみ表示 */}
-        {rec.priceOptions && rec.priceOptions.length > 1 && (
+        {/* 住所セクション */}
+        {(studio.address ?? studio.description) && (
           <div className="modal-section">
-            <h3 className="modal-section-title">料金プラン</h3>
-            <div className="price-plan-list">
-              {rec.priceOptions.map((p) => (
-                <div key={p.label} className="price-plan-row">
-                  <span className="price-plan-label">{p.label}</span>
-                  <span className="price-plan-yen">¥{p.priceYen.toLocaleString()}/時間</span>
+            <h3 className="modal-section-title">住所</h3>
+            <p className="modal-reason">{studio.address ?? studio.description}</p>
+          </div>
+        )}
+
+        {/* 部屋一覧セクション: 広さ・鏡または天井高・最安料金・写真・平面図・設備・予約リンク */}
+        {studio.rooms && studio.rooms.length > 0 && (
+          <div className="modal-section">
+            <h3 className="modal-section-title">部屋一覧</h3>
+            <div className="room-detail-list">
+              {studio.rooms.map((room) => (
+                <div key={room.roomName} className="room-detail-card">
+                  <div className="price-plan-row">
+                    <span className="price-plan-label">
+                      <Ruler size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                      {room.roomName}
+                      {room.areaSqm != null && ` ${room.areaSqm}㎡`}
+                      {room.secondDimensionLabel && room.secondDimensionM != null &&
+                        ` / ${room.secondDimensionLabel} ${room.secondDimensionM}m`}
+                    </span>
+                    <span className="price-plan-yen">
+                      {room.minPriceYen != null ? `¥${room.minPriceYen.toLocaleString()}〜/時間` : "問合せ"}
+                    </span>
+                  </div>
+
+                  {/* 部屋写真・平面図（取得できているブランドのみ表示） */}
+                  {((room.photoUrls && room.photoUrls.length > 0) || room.floorPlanUrl) && (
+                    <div className="room-photo-strip">
+                      {room.photoUrls?.slice(0, 4).map((url) => (
+                        <img key={url} src={url} alt={`${room.roomName}の写真`} className="room-photo-thumb" />
+                      ))}
+                      {room.floorPlanUrl && (
+                        <img src={room.floorPlanUrl} alt={`${room.roomName}の平面図`} className="room-photo-thumb room-floorplan-thumb" />
+                      )}
+                    </div>
+                  )}
+
+                  {/* 設備・特記事項（取得できているブランドのみ表示） */}
+                  {room.equipment && room.equipment.length > 0 && (
+                    <div className="room-equipment-tags">
+                      {room.equipment.map((e) => (
+                        <span key={e} className="facility-tag sm">{e}</span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* この部屋の公式サイト予約リンク（取得できているブランドのみ表示） */}
+                  {room.reserveUrl && (
+                    <a
+                      href={room.reserveUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="room-reserve-link"
+                      onClick={() => recordAnalyticsEvent("click_reserve", studio.studioId)}
+                    >
+                      <CalendarCheck size={12} />
+                      この部屋を公式サイトで見る
+                    </a>
+                  )}
                 </div>
               ))}
             </div>
@@ -178,25 +180,25 @@ export const DetailModal = ({ recommendation: rec, isFavorite, onClose, onToggle
         <div className="modal-actions">
           {/* 予約はアプリ内で完結させず、公式サイト or 電話番号への外部リンクとして提供する
               （実際の予約処理はスタジオ側のシステムに委ねる） */}
-          {rec.studio?.website ? (
+          {studio.website ?? studio.sourceUrl ? (
             <a
-              href={rec.studio.website}
+              href={studio.website ?? studio.sourceUrl}
               target="_blank"
               rel="noreferrer"
               className="btn-nav btn-reserve"
-              onClick={() => recordAnalyticsEvent("click_reserve", rec.studioId)}
+              onClick={() => recordAnalyticsEvent("click_reserve", studio.studioId)}
             >
               <CalendarCheck size={16} />
               予約する（公式サイト）
             </a>
-          ) : rec.studio?.phoneNumber ? (
+          ) : studio.phoneNumber ? (
             <a
-              href={`tel:${rec.studio.phoneNumber}`}
+              href={`tel:${studio.phoneNumber}`}
               className="btn-nav btn-reserve"
-              onClick={() => recordAnalyticsEvent("click_reserve", rec.studioId)}
+              onClick={() => recordAnalyticsEvent("click_reserve", studio.studioId)}
             >
               <Phone size={16} />
-              電話で予約（{rec.studio.phoneNumber}）
+              電話で予約（{studio.phoneNumber}）
             </a>
           ) : null}
 
@@ -207,7 +209,7 @@ export const DetailModal = ({ recommendation: rec, isFavorite, onClose, onToggle
 
           <button
             className={`btn-fav ${isFavorite ? "active" : ""}`}
-            onClick={() => onToggleFavorite(rec.studioId)}
+            onClick={() => onToggleFavorite(studio.studioId)}
           >
             <Heart size={16} fill={isFavorite ? "currentColor" : "none"} />
             {isFavorite ? "保存済み" : "お気に入りに追加"}
@@ -227,7 +229,7 @@ export const DetailModal = ({ recommendation: rec, isFavorite, onClose, onToggle
           />
 
           {/* このスタジオのレビュー一覧へ */}
-          <Link to={`/posts?studioId=${rec.studioId}`} className="btn-nav">
+          <Link to={`/posts?studioId=${studio.studioId}`} className="btn-nav">
             <MessageSquare size={16} />
             このスタジオのレビューを見る
           </Link>

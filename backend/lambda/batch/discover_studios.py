@@ -66,10 +66,20 @@ CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 
 STUDIOS_TABLE = os.environ.get("STUDIOS_TABLE", "studio-studios")
 
+# 対象を4ブランド（BUZZ/worcle/NOAH/スタジオミッション）の新規出店発見に限定する。
+# 全国横断の一般キーワード検索（"ダンススタジオ レンタル"等）は行わず、ブランド名で
+# Text Searchすることで「これらのブランドの店舗が増えたら拾える」状態を維持しつつ、
+# 対象外スタジオが大量に混入するのを防ぐ。
+TARGET_BRAND_QUERIES = [
+    "BUZZ レンタルスタジオ 東京",
+    "studio worcle 東京",
+    "サウンドスタジオノア 東京",
+    "スタジオミッション 渋谷",
+]
 # 位置指定なし（全国探索）時の検索キーワード
-NATIONWIDE_QUERIES = ["ダンススタジオ レンタル", "レンタルスタジオ 鏡張り"]
-# 現在地指定あり（近傍探索）時の検索キーワード。位置バイアスで絞り込むためクエリは単純でよい
-NEARBY_QUERY = "ダンススタジオ レンタル"
+NATIONWIDE_QUERIES = TARGET_BRAND_QUERIES
+# 現在地指定あり（近傍探索）時の検索キーワード。複数ブランドを横断して検索する
+NEARBY_QUERY = TARGET_BRAND_QUERIES
 
 # ダンスに関係ないスタジオ（ヨガ・ピラティス）を除外するための名前キーワード。
 # Google Placesのtypesではヨガ・ピラティスとダンスを区別できない（どちらもgym/health系タグの
@@ -88,6 +98,33 @@ def is_excluded_by_name(name: str) -> bool:
     """
     lowered = name.lower()
     return any(keyword.lower() in lowered for keyword in EXCLUDED_NAME_KEYWORDS)
+
+
+# Google Places Text Searchの結果からブランドを判定するための店名キーワード。
+# 対象4ブランド以外はTARGET_BRAND_QUERIESで絞り込んでいても類似名の別店舗が
+# 混ざることがあるため、店名に基づいて最終判定する。
+BRAND_NAME_KEYWORDS: dict[str, list[str]] = {
+    "buzz": ["buzz"],
+    "worcle": ["worcle"],
+    "noah": ["ノア", "noah"],
+    "mission": ["ミッション", "mission"],
+}
+
+
+def detect_brand(name: str) -> str | None:
+    """スタジオ名から対象4ブランドのいずれかを判定する。
+
+    Args:
+        name (str): スタジオ名
+
+    Returns:
+        str | None: "buzz"/"worcle"/"noah"/"mission"のいずれか。どれにも一致しなければNone
+    """
+    lowered = name.lower()
+    for brand, keywords in BRAND_NAME_KEYWORDS.items():
+        if any(kw.lower() in lowered for kw in keywords):
+            return brand
+    return None
 # 現在地指定時の検索半径（メートル）
 NEARBY_RADIUS_M = 15000
 
@@ -450,7 +487,7 @@ def run_discovery(location_bias: Optional[dict[str, float]] = None) -> dict[str,
     existing_studios: list[dict[str, Any]] = studios_table.scan()["Items"]
     existing_coords = [(float(s.get("lat", 0)), float(s.get("lng", 0))) for s in existing_studios]
 
-    queries = [NEARBY_QUERY] if location_bias else NATIONWIDE_QUERIES
+    queries = NEARBY_QUERY if location_bias else NATIONWIDE_QUERIES
 
     # 複数クエリの結果を集約し、クエリ間の重複も除去する。
     # ヨガ・ピラティススタジオ（ダンスに無関係）は店名キーワードでここで除外する
@@ -468,6 +505,13 @@ def run_discovery(location_bias: Optional[dict[str, float]] = None) -> dict[str,
     added, skipped = 0, 0
 
     for c in candidates.values():
+        # 対象4ブランドのいずれにも一致しない候補は登録しない
+        # （TARGET_BRAND_QUERIESでの絞り込みだけでは類似名の別店舗が混ざりうるため）
+        brand = detect_brand(c["name"])
+        if brand is None:
+            skipped += 1
+            continue
+
         # 既存スタジオと近傍（300m以内）なら重複とみなしてスキップ
         is_duplicate = any(
             haversine_km(c["lat"], c["lng"], elat, elng) * 1000 < DUPLICATE_THRESHOLD_M
@@ -504,7 +548,7 @@ def run_discovery(location_bias: Optional[dict[str, float]] = None) -> dict[str,
                     price_options = scraped_plans
                     cost_yen = min(p["priceYen"] for p in scraped_plans)
 
-        studio_id = f"studio-{random.getrandbits(32):08x}"
+        studio_id = f"{brand}-{random.getrandbits(32):08x}"
 
         # スタジオ写真の自動取得。候補に写真が無い/取得失敗時はimageUrlを設定しない
         image_url = None
@@ -513,6 +557,7 @@ def run_discovery(location_bias: Optional[dict[str, float]] = None) -> dict[str,
 
         studios_table.put_item(Item={
             "studioId": studio_id,
+            "brand": brand,
             "name": c["name"],
             "lat": Decimal(str(c["lat"])),
             "lng": Decimal(str(c["lng"])),

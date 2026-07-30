@@ -35,7 +35,8 @@ Globals:
     Environment:
       Variables:
         STUDIOS_TABLE: !Ref StudiosTable
-        RECOMMENDATIONS_TABLE: !Ref RecommendationsTable
+        AVAILABILITY_TABLE: !Ref AvailabilityTable
+        EVENTS_TABLE: !Ref EventsTable
         FAVORITES_TABLE: !Ref FavoritesTable
         POSTS_TABLE: !Ref PostsTable
         CHATS_TABLE: !Ref ChatsTable
@@ -129,15 +130,21 @@ Resources:
       KeySchema:
         - { AttributeName: studioId, KeyType: HASH }
 
-  RecommendationsTable:
+  # 4ブランド（BUZZ/worcle/NOAH/スタジオミッション）のローカルスクレイピング結果を保存する。
+  # PK: studioId（例: buzz-kichijoji-101st）, SK: date（YYYY-MM-DD）。
+  # 1日単位で「その部屋・その日の全時間帯の空き/埋まり」をslots配列にまとめて1アイテムとして持つ。
+  # ローカルのscrape_availability.pyから手動更新するのみで、Lambdaからの書き込みは行わない。
+  AvailabilityTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: studio-recommendations
+      TableName: studio-availability
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - { AttributeName: studioId, AttributeType: S }
+        - { AttributeName: date, AttributeType: S }
       KeySchema:
         - { AttributeName: studioId, KeyType: HASH }
+        - { AttributeName: date, KeyType: RANGE }
 
   FavoritesTable:
     Type: AWS::DynamoDB::Table
@@ -150,6 +157,22 @@ Resources:
       KeySchema:
         - { AttributeName: userId, KeyType: HASH }
         - { AttributeName: studioId, KeyType: RANGE }
+
+  # ユーザーが登録する「次のイベント」情報（ステージ実寸・出演人数）。
+  # 1ユーザーが複数件登録・管理できるよう userId(PK) + eventId(SK) の複合キーとする。
+  # このデータをもとに GetRecommendedStudiosFunction が「目的・日付・時間帯」の
+  # 指定と組み合わせて、条件に合うスタジオ・部屋を絞り込む。
+  EventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: studio-events
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: userId, AttributeType: S }
+        - { AttributeName: eventId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: userId, KeyType: HASH }
+        - { AttributeName: eventId, KeyType: RANGE }
 
   PostsTable:
     Type: AWS::DynamoDB::Table
@@ -247,22 +270,6 @@ Resources:
   # Lambda 関数定義（API系）
   # ==============================================================
 
-  GetRecommendationsFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: handlers.getRecommendationsHandler
-      CodeUri: ../backend/lambda/api/
-      Policies:
-        - DynamoDBReadPolicy: { TableName: !Ref RecommendationsTable }
-        - DynamoDBReadPolicy: { TableName: !Ref StudiosTable }
-      Events:
-        Api:
-          Type: Api
-          Properties:
-            RestApiId: !Ref Api
-            Path: /recommendations
-            Method: GET
-
   GetStudiosFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -276,6 +283,23 @@ Resources:
           Properties:
             RestApiId: !Ref Api
             Path: /studios
+            Method: GET
+
+  # GET /studios/{studioId}/availability?date=YYYY-MM-DD
+  # ローカルスクリプトが書き込んだ4ブランドの空き状況を返す。指定日のデータが無ければ空配列を返す
+  GetStudioAvailabilityFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers.getStudioAvailabilityHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref AvailabilityTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /studios/{studioId}/availability
             Method: GET
 
   # スタジオ詳細の表示・予約ボタンのクリックを記録する。未ログインでも計測できるよう
@@ -360,6 +384,84 @@ Resources:
             RestApiId: !Ref Api
             Path: /favorites/{studioId}
             Method: DELETE
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # ==============================================================
+  # /events — 「次のイベント」登録（ステージ実寸・出演人数・目的・日付・時間帯）
+  # ==============================================================
+  GetEventsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers.getEventsHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref EventsTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /events
+            Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  CreateEventFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers.postEventsHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref EventsTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /events
+            Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  DeleteEventFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers.deleteEventHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref EventsTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /events/{eventId}
+            Method: DELETE
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # GET /recommend-studios?eventId=...&purpose=...&date=...&startTime=...
+  # イベント（ステージ実寸・人数）＋目的・日付・時間帯から、条件に合う部屋を持つ
+  # スタジオを絞り込んで返す。認証不要（未ログインでもイベント無しでの絞り込みは
+  # 将来的に許容する余地を残すため）だが、eventId指定時はそのユーザーの
+  # イベントデータのみ参照できるよう認証必須にする
+  GetRecommendedStudiosFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers.getRecommendedStudiosHandler
+      CodeUri: ../backend/lambda/api/
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref EventsTable }
+        - DynamoDBReadPolicy: { TableName: !Ref StudiosTable }
+        - DynamoDBReadPolicy: { TableName: !Ref AvailabilityTable }
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /recommend-studios
+            Method: GET
             Auth:
               Authorizer: CognitoAuthorizer
 
@@ -463,7 +565,6 @@ Resources:
         - DynamoDBCrudPolicy: { TableName: !Ref ChatsTable }
         - DynamoDBCrudPolicy: { TableName: !Ref UsageTable }
         - DynamoDBReadPolicy: { TableName: !Ref StudiosTable }
-        - DynamoDBReadPolicy: { TableName: !Ref RecommendationsTable }
       Events:
         Api:
           Type: Api
@@ -562,64 +663,6 @@ Resources:
   # ==============================================================
   # Lambda 関数定義（バッチ系）
   # ==============================================================
-
-  # 全スタジオのスコア計算 + Claude API による推薦理由生成バッチ
-  # discover_studios.run_discovery もこの中で実行するため（「AI分析を実行」が新スタジオ探索も兼ねる）、
-  # StudiosTableへの書き込み権限とPlaces APIキーの読み取り権限を追加している
-  GenerateStudioScoreBatch:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: generate_studio_score.handler
-      CodeUri: ../backend/lambda/batch/
-      # discover_studios.run_discovery が新規候補ごとに最寄り駅検索・公式サイト取得・
-      # Claude呼び出し2回（設備・収容人数）+ 価格抽出を行うようになったため、
-      # 初回の全国探索（候補数が多い）でも余裕を持たせてLambda上限の900秒に設定
-      Timeout: 900
-      MemorySize: 512
-      Policies:
-        - SSMParameterReadPolicy:
-            # SAM の SSMParameterReadPolicy は内部で "parameter/${ParameterName}" として
-            # ARN を組み立てるため、先頭にスラッシュを付けると二重スラッシュのARNになり
-            # 実際のパラメータと一致しなくなる（AccessDeniedの原因）。そのため付けない。
-            ParameterName: studio-search/anthropic-api-key
-        - SSMParameterReadPolicy:
-            ParameterName: studio-search/google-places-api-key
-        - DynamoDBCrudPolicy:
-            TableName: !Ref StudiosTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref RecommendationsTable
-        - S3WritePolicy: { BucketName: !Ref UploadsBucket }
-      Events:
-        Schedule:
-          Type: Schedule
-          Properties:
-            Schedule: cron(0 21 * * ? *)
-            Enabled: true
-
-  # POST /admin/run-ai-batch — フロントの「AI実行ボタン」から手動でバッチを起動する
-  AdminRunAiBatchFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: admin_trigger.handler
-      CodeUri: ../backend/lambda/batch/
-      Timeout: 330
-      Environment:
-        Variables:
-          BATCH_FUNCTION_NAME: !Ref GenerateStudioScoreBatch
-          RATE_LIMIT_ACTION: ai-batch
-          RATE_LIMIT_DAILY: "3"
-      Policies:
-        - LambdaInvokePolicy: { FunctionName: !Ref GenerateStudioScoreBatch }
-        - DynamoDBCrudPolicy: { TableName: !Ref UsageTable }
-      Events:
-        Api:
-          Type: Api
-          Properties:
-            RestApiId: !Ref Api
-            Path: /admin/run-ai-batch
-            Method: POST
-            Auth:
-              Authorizer: CognitoAuthorizer
 
   # 新規レンタルスタジオ候補を Google Places API で探索し、Studios テーブルに追加するバッチ
   # POST /admin/run-studio-discovery（フロントの「現在地から探す」ボタン）専用として、

@@ -61,8 +61,9 @@ dynamodb = boto3.resource(
 )  # type: ignore[attr-defined]
 
 STUDIOS_TABLE = os.environ.get("STUDIOS_TABLE", "studio-studios")
-RECOMMENDATIONS_TABLE = os.environ.get("RECOMMENDATIONS_TABLE", "studio-recommendations")
+AVAILABILITY_TABLE = os.environ.get("AVAILABILITY_TABLE", "studio-availability")
 FAVORITES_TABLE = os.environ.get("FAVORITES_TABLE", "studio-favorites")
+EVENTS_TABLE = os.environ.get("EVENTS_TABLE", "studio-events")
 POSTS_TABLE = os.environ.get("POSTS_TABLE", "studio-posts")
 CHATS_TABLE = os.environ.get("CHATS_TABLE", "studio-chats")
 USAGE_TABLE = os.environ.get("USAGE_TABLE", "studio-usage")
@@ -228,42 +229,37 @@ def _get_table(name: str):
     return dynamodb.Table(name)  # type: ignore[attr-defined]
 
 
-# ─────────────────────────────
-# /recommendations
-# ─────────────────────────────
-@handler_guard
-def getRecommendationsHandler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """GET /recommendations — おすすめスタジオ一覧をスコア降順で返す。
-
-    RecommendationsTable と StudiosTable を突き合わせ、
-    各推薦データに対応するスタジオ情報（studio）を付与して返す。
+def _is_excluded_facility(name: str) -> bool:
+    """ヨガ・ピラティスなどの除外対象スタジオかどうかを判定する。
 
     Args:
-        event (dict[str, Any]): API Gateway イベントオブジェクト（本エンドポイントでは未使用）
-        context (Any): Lambda コンテキストオブジェクト
+        name (str): スタジオ名
 
     Returns:
-        dict[str, Any]: statusCode=200、body に {"items": [...]}（スコア降順）
+        bool: 除外対象ならTrue
     """
-    table_r = _get_table(RECOMMENDATIONS_TABLE)
-    table_s = _get_table(STUDIOS_TABLE)
+    excluded_keywords = {"ヨガ", "yoga", "ピラティス", "pilates"}
+    name_lower = name.lower()
+    return any(kw in name_lower or kw in name for kw in excluded_keywords)
 
-    recs = table_r.scan().get("Items", [])
-    # DynamoDB（NoSQL）はテーブル間JOINができないため、studioIdをキーにした辞書を作り、
-    # アプリケーション側で手動で結合する
-    studios = {s["studioId"]: s for s in table_s.scan().get("Items", [])}
 
-    for rec in recs:
-        rec["studio"] = studios.get(rec.get("studioId"), {})
+# 対象を4ブランド（BUZZ/worcle/NOAH/スタジオミッション）のみに限定する。
+# Google Placesによる全国自動発見の仕組み自体（discover_studios.py）は残すが、
+# アプリの表示対象からは外し、backend/scripts/scrape_availability.py 等で
+# brand属性を付与して手動登録したレコードのみを表示する。
+SUPPORTED_BRANDS = {"buzz", "worcle", "noah", "mission"}
 
-    # スコア降順（高いほど先頭）。フロント側で上位3件をTOP3として強調表示する
-    recs_sorted = sorted(
-        recs,
-        key=lambda x: float(x.get("score", 0)),
-        reverse=True
-    )
 
-    return _resp(200, {"items": _decimal_to_float(recs_sorted)})
+def _is_supported_brand(studio: dict[str, Any]) -> bool:
+    """4ブランド対象のスタジオかどうかを判定する。
+
+    Args:
+        studio (dict[str, Any]): StudiosTableのアイテム
+
+    Returns:
+        bool: brand属性がSUPPORTED_BRANDSに含まれていればTrue
+    """
+    return studio.get("brand") in SUPPORTED_BRANDS
 
 
 # ─────────────────────────────
@@ -271,9 +267,11 @@ def getRecommendationsHandler(event: dict[str, Any], context: Any) -> dict[str, 
 # ─────────────────────────────
 @handler_guard
 def getStudiosHandler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """GET /studios — 全レンタルスタジオ一覧を返す。
+    """GET /studios — 対象4ブランド（BUZZ/worcle/NOAH/スタジオミッション）の
+    レンタルスタジオ一覧を返す。
 
-    StudiosTable を全件スキャンして返却する。並び順は保証されない。
+    StudiosTable を全件スキャンして返却する。ヨガ・ピラティス、および
+    4ブランド以外（Google Places発見分）は除外する。並び順は保証されない。
 
     Args:
         event (dict[str, Any]): API Gateway イベントオブジェクト（本エンドポイントでは未使用）
@@ -284,7 +282,53 @@ def getStudiosHandler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     table = _get_table(STUDIOS_TABLE)
     items = table.scan().get("Items", [])
-    return _resp(200, {"items": _decimal_to_float(items)})
+    filtered_items = [
+        item for item in items
+        if not _is_excluded_facility(item.get("name", "")) and _is_supported_brand(item)
+    ]
+    return _resp(200, {"items": _decimal_to_float(filtered_items)})
+
+
+# ─────────────────────────────
+# /studios/{studioId}/availability
+# ─────────────────────────────
+@handler_guard
+def getStudioAvailabilityHandler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    """GET /studios/{studioId}/availability?date=YYYY-MM-DD
+
+    4ブランド（BUZZ/worcle/NOAH/スタジオミッション）についてローカルの
+    scrape_availability.pyが書き込んだ空き状況（30分刻みのslots配列）を返す。
+    対象外のスタジオや、指定日のデータがまだスクレイピングされていない場合は
+    404ではなく空配列を返す（「まだ取得していないだけ」を明示するため）。
+
+    Args:
+        event (dict[str, Any]): API Gateway イベントオブジェクト
+            pathParameters.studioId (str): スタジオID
+            queryStringParameters.date (str): YYYY-MM-DD形式の日付（必須）
+        context (Any): Lambda コンテキストオブジェクト
+
+    Returns:
+        dict[str, Any]:
+            成功時 200: {"studioId": ..., "date": ..., "rooms": [...]}（未取得時はrooms: []）
+            date未指定時 400: {"error": "..."}
+    """
+    studio_id = event.get("pathParameters", {}).get("studioId")
+    query = event.get("queryStringParameters") or {}
+    date = query.get("date")
+
+    if not date:
+        return _resp(400, {"error": "date is required (YYYY-MM-DD)"})
+
+    table = _get_table(AVAILABILITY_TABLE)
+    resp = table.get_item(Key={"studioId": studio_id, "date": date})
+    item = resp.get("Item")
+
+    return _resp(200, {
+        "studioId": studio_id,
+        "date": date,
+        "rooms": _decimal_to_float(item.get("rooms", [])) if item else [],
+        "scrapedAt": item.get("scrapedAt") if item else None,
+    })
 
 
 # ─────────────────────────────
@@ -491,6 +535,267 @@ def deleteFavoritesHandler(event: dict[str, Any], context: Any) -> dict[str, Any
     )
 
     return _resp(200, {"message": "deleted"})
+
+
+# ─────────────────────────────
+# /events
+# ─────────────────────────────
+
+# 目的ごとに「必要な広さの余裕度」の重み付けを変える。
+# 振り入れ（新しい振付を覚える段階）は鏡の前で細かい確認をするため、
+# 出演人数に対して部屋がゆったりしているほど良い（広さの余裕を重視）。
+# 構成（立ち位置・隊形を確認する段階）は部屋の絶対的な広さよりも
+# 隊形移動のスペースが取れるかが重要なため、出演人数1人あたりの必要面積を
+# やや小さめに見積もる（振り入れほど余裕を求めない）。
+EVENT_PURPOSES = ["振り入れ", "構成"]
+REQUIRED_SQM_PER_PERSON = {"振り入れ": 2.5, "構成": 1.8}
+DEFAULT_SQM_PER_PERSON = 2.0
+
+
+@handler_guard
+def getEventsHandler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    """GET /events — ログイン中ユーザーが登録した「次のイベント」一覧を返す。
+
+    Args:
+        event (dict[str, Any]): API Gateway イベントオブジェクト（Cognito認証必須）
+        context (Any): Lambda コンテキストオブジェクト
+
+    Returns:
+        dict[str, Any]: statusCode=200、body に {"items": [...]}（更新日時降順）
+    """
+    user_id = _get_user_id(event)
+    table = _get_table(EVENTS_TABLE)
+
+    resp = table.query(KeyConditionExpression=Key("userId").eq(user_id))
+    items = sorted(resp.get("Items", []), key=lambda x: x.get("updatedAt", ""), reverse=True)
+
+    return _resp(200, {"items": _decimal_to_float(items)})
+
+
+@handler_guard
+def postEventsHandler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    """POST /events — 「次のイベント」を新規登録する。
+
+    ステージの実寸（縦横メートル）と出演人数を登録しておくことで、
+    GET /recommend-studios がこのイベントに合うスタジオを絞り込めるようにする。
+    userIdはCognito認証のクレームから取得する。
+
+    Args:
+        event (dict[str, Any]): API Gateway イベントオブジェクト（Cognito認証必須）
+            body (str): JSON文字列。
+                title (str, 必須): イベント名（例: "秋公演"）
+                stageWidthM (number, 必須): ステージ横幅（メートル）
+                stageDepthM (number, 必須): ステージ奥行き（メートル）
+                performerCount (int, 必須): 出演人数
+        context (Any): Lambda コンテキストオブジェクト
+
+    Returns:
+        dict[str, Any]:
+            成功時 201: {"event": {...}}
+            必須項目不足時 400: {"error": "..."}
+    """
+    body = json.loads(event.get("body") or "{}")
+    user_id = _get_user_id(event)
+
+    title = body.get("title")
+    stage_width_m = body.get("stageWidthM")
+    stage_depth_m = body.get("stageDepthM")
+    performer_count = body.get("performerCount")
+
+    if not title:
+        return _resp(400, {"error": "title is required"})
+    if stage_width_m is None or stage_depth_m is None:
+        return _resp(400, {"error": "stageWidthM and stageDepthM are required"})
+    if performer_count is None:
+        return _resp(400, {"error": "performerCount is required"})
+
+    now = datetime.now(timezone.utc).isoformat()
+    item = {
+        "userId": user_id,
+        "eventId": str(uuid.uuid4()),
+        "title": title,
+        "stageWidthM": Decimal(str(stage_width_m)),
+        "stageDepthM": Decimal(str(stage_depth_m)),
+        "performerCount": int(performer_count),
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+    table = _get_table(EVENTS_TABLE)
+    table.put_item(Item=item)
+
+    return _resp(201, {"event": _decimal_to_float(item)})
+
+
+@handler_guard
+def deleteEventHandler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    """DELETE /events/{eventId} — 「次のイベント」を削除する。
+
+    Args:
+        event (dict[str, Any]): API Gateway イベントオブジェクト（Cognito認証必須）
+            pathParameters.eventId (str): 削除対象のイベントID
+        context (Any): Lambda コンテキストオブジェクト
+
+    Returns:
+        dict[str, Any]:
+            成功時 200: {"message": "deleted"}
+            eventId 未指定時 400: {"error": "..."}
+    """
+    event_id = (event.get("pathParameters") or {}).get("eventId")
+    user_id = _get_user_id(event)
+
+    if not event_id:
+        return _resp(400, {"error": "eventId is required"})
+
+    table = _get_table(EVENTS_TABLE)
+    table.delete_item(Key={"userId": user_id, "eventId": event_id})
+
+    return _resp(200, {"message": "deleted"})
+
+
+# ─────────────────────────────
+# /recommend-studios
+# ─────────────────────────────
+
+def _time_to_minutes(time_str: str) -> int:
+    """"HH:MM"形式の時刻文字列を0時からの経過分に変換する。
+
+    Args:
+        time_str (str): "HH:MM"形式の時刻（例: "18:30"）
+
+    Returns:
+        int: 0時からの経過分
+    """
+    h, m = time_str.split(":")
+    return int(h) * 60 + int(m)
+
+
+def _room_meets_size(room: dict[str, Any], performer_count: int, purpose: str) -> bool:
+    """部屋の広さが、出演人数・目的に対して十分かを判定する。
+
+    Args:
+        room (dict[str, Any]): studio-studiosのrooms要素
+        performer_count (int): 出演人数
+        purpose (str): "振り入れ" または "構成"（EVENT_PURPOSESのいずれか）
+
+    Returns:
+        bool: 広さが足りていればTrue（areaSqm不明の部屋は判定不能として除外しFalseを返す）
+    """
+    area_sqm = room.get("areaSqm")
+    if area_sqm is None:
+        return False
+    required_per_person = REQUIRED_SQM_PER_PERSON.get(purpose, DEFAULT_SQM_PER_PERSON)
+    return float(area_sqm) >= performer_count * required_per_person
+
+
+def _room_has_availability(
+    availability_table, studio_id: str, room_name: str, date: str,
+    start_time: str, duration_minutes: int,
+) -> bool:
+    """指定日・指定時間帯にその部屋が空いているかを判定する。
+
+    start_timeから duration_minutes 分の間、該当する全スロットが
+    available=true である場合のみTrueを返す（一部でも埋まっていれば不可）。
+
+    Args:
+        availability_table: AvailabilityTableのboto3 Table
+        studio_id (str): スタジオID
+        room_name (str): 部屋名
+        date (str): YYYY-MM-DD形式の日付
+        start_time (str): "HH:MM"形式の希望開始時刻
+        duration_minutes (int): 希望利用時間（分）
+
+    Returns:
+        bool: 指定時間帯すべてが空いていればTrue。データが無い場合もFalse
+            （「空いているかどうか分からない」を「空いていない」として安全側に倒す）
+    """
+    resp = availability_table.get_item(Key={"studioId": studio_id, "date": date})
+    item = resp.get("Item")
+    if not item:
+        return False
+
+    room_data = next((r for r in item.get("rooms", []) if r.get("roomName") == room_name), None)
+    if not room_data:
+        return False
+
+    start_min = _time_to_minutes(start_time)
+    end_min = start_min + duration_minutes
+
+    covering_slots = [
+        s for s in room_data.get("slots", [])
+        if start_min <= _time_to_minutes(s["time"]) < end_min
+    ]
+    if not covering_slots:
+        return False
+
+    return all(s.get("available") for s in covering_slots)
+
+
+@handler_guard
+def getRecommendedStudiosHandler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    """GET /recommend-studios — イベント条件に合うスタジオ・部屋を絞り込んで返す。
+
+    【広さ条件を満たす】かつ【指定時間帯に空きあり】の部屋のみを返す
+    シンプルな絞り込み（スコアリングは行わない）。
+
+    Args:
+        event (dict[str, Any]): API Gateway イベントオブジェクト（Cognito認証必須）
+            queryStringParameters:
+                eventId (str, 必須): 対象の登録済みイベントID（ログインユーザー自身のもの）
+                purpose (str, 必須): "振り入れ" または "構成"
+                date (str, 必須): YYYY-MM-DD形式の希望日
+                startTime (str, 必須): "HH:MM"形式の希望開始時刻
+                durationMinutes (str, 省略可): 希望利用時間（分）。省略時は120分
+        context (Any): Lambda コンテキストオブジェクト
+
+    Returns:
+        dict[str, Any]:
+            成功時 200: {"items": [{"studio": {...}, "room": {...}}, ...]}
+            必須パラメータ不足時 400: {"error": "..."}
+            eventId該当なし時 404: {"error": "..."}
+    """
+    user_id = _get_user_id(event)
+    query = event.get("queryStringParameters") or {}
+
+    event_id = query.get("eventId")
+    purpose = query.get("purpose")
+    date = query.get("date")
+    start_time = query.get("startTime")
+    duration_minutes = int(query.get("durationMinutes", 120))
+
+    if not event_id or not purpose or not date or not start_time:
+        return _resp(400, {"error": "eventId, purpose, date, startTime are required"})
+    if purpose not in EVENT_PURPOSES:
+        return _resp(400, {"error": f"purpose must be one of: {', '.join(EVENT_PURPOSES)}"})
+
+    events_table = _get_table(EVENTS_TABLE)
+    event_item = events_table.get_item(Key={"userId": user_id, "eventId": event_id}).get("Item")
+    if not event_item:
+        return _resp(404, {"error": "event not found"})
+
+    performer_count = int(event_item["performerCount"])
+
+    studios_table = _get_table(STUDIOS_TABLE)
+    availability_table = _get_table(AVAILABILITY_TABLE)
+
+    studios = [
+        s for s in studios_table.scan().get("Items", [])
+        if not _is_excluded_facility(s.get("name", "")) and _is_supported_brand(s)
+    ]
+
+    matches = []
+    for studio in studios:
+        for room in studio.get("rooms", []):
+            if not _room_meets_size(room, performer_count, purpose):
+                continue
+            if not _room_has_availability(
+                availability_table, studio["studioId"], room["roomName"],
+                date, start_time, duration_minutes,
+            ):
+                continue
+            matches.append({"studio": studio, "room": room})
+
+    return _resp(200, {"items": _decimal_to_float(matches)})
 
 
 # ─────────────────────────────
@@ -816,11 +1121,12 @@ STUDIOS_CONTEXT_LIMIT = 40
 
 
 def _build_studios_context(user_lat: float | None = None, user_lng: float | None = None) -> str:
-    """AI相談のプロンプトに埋め込む、実際のStudios/Recommendationsデータのコンパクトな要約を作る。
+    """AI相談のプロンプトに埋め込む、実際のStudiosデータのコンパクトな要約を作る。
 
     discover_studios.pyが「座標などの実在情報はPlaces APIのみを採用しClaudeに生成させない」
     という方針を取っているのと同じ考え方で、チャットについても実データをそのまま渡すことで
     Claudeが存在しないスタジオを作り出す（ハルシネーション）のを防ぐ。
+    対象は4ブランド（BUZZ/worcle/NOAH/スタジオミッション）のみ。
 
     Args:
         user_lat (float | None): ユーザーの現在地の緯度（省略可）
@@ -830,29 +1136,36 @@ def _build_studios_context(user_lat: float | None = None, user_lng: float | None
         str: 箇条書きテキスト。スタジオが1件も無い場合は空文字列
     """
     table_s = _get_table(STUDIOS_TABLE)
-    table_r = _get_table(RECOMMENDATIONS_TABLE)
 
-    studios = table_s.scan().get("Items", [])
-    recs = {r["studioId"]: r for r in table_r.scan().get("Items", [])}
+    studios = [
+        s for s in table_s.scan().get("Items", [])
+        if not _is_excluded_facility(s.get("name", "")) and _is_supported_brand(s)
+    ]
 
     rows = []
     for s in studios:
-        rec = recs.get(s.get("studioId"), {})
+        rooms = s.get("rooms") or []
+        area_range = ""
+        if rooms:
+            areas = [float(r["areaSqm"]) for r in rooms if r.get("areaSqm") is not None]
+            if areas:
+                area_range = f"{min(areas):.1f}〜{max(areas):.1f}㎡"
         row: dict[str, Any] = {
             "name": s.get("name", "名称不明"),
-            "place": s.get("description", ""),
-            "facilityTags": s.get("facilityTags", []),
-            "score": float(rec.get("score", 0)),
+            "place": s.get("address", s.get("description", "")),
+            "brand": s.get("brand", ""),
+            "areaRange": area_range,
+            "roomCount": len(rooms),
         }
         if user_lat is not None and user_lng is not None and "lat" in s and "lng" in s:
             row["distanceKm"] = round(_haversine_km(user_lat, user_lng, float(s["lat"]), float(s["lng"])), 1)
         rows.append(row)
 
-    # 現在地が分かる場合は近い順、分からない場合はスコア降順で並べ、上限件数に絞る
+    # 現在地が分かる場合は近い順、分からない場合は店舗名順に並べ、上限件数に絞る
     if user_lat is not None and user_lng is not None:
         rows.sort(key=lambda r: r.get("distanceKm", float("inf")))
     else:
-        rows.sort(key=lambda r: r["score"], reverse=True)
+        rows.sort(key=lambda r: r["name"])
     rows = rows[:STUDIOS_CONTEXT_LIMIT]
 
     if not rows:
@@ -860,7 +1173,9 @@ def _build_studios_context(user_lat: float | None = None, user_lng: float | None
 
     lines = []
     for r in rows:
-        parts = [f"設備={','.join(r['facilityTags']) or '不明'}", f"スコア={r['score']:.0f}"]
+        parts = [f"部屋数={r['roomCount']}"]
+        if r["areaRange"]:
+            parts.append(f"広さ={r['areaRange']}")
         if "distanceKm" in r:
             parts.append(f"現在地から{r['distanceKm']}km")
         lines.append(f"- {r['name']}（{r['place']}）: {', '.join(parts)}")

@@ -732,6 +732,183 @@ body  {
   font-weight: 700;
 }
 
+/* 部屋詳細カード: 写真・平面図・設備・公式サイト予約リンクを1部屋分にまとめる */
+.room-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.room-detail-card {
+  background: var(--bg3);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.room-detail-card .price-plan-row {
+  background: none;
+  padding: 0;
+}
+
+.room-photo-strip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.room-photo-thumb {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.room-floorplan-thumb {
+  border: 2px solid var(--accent);
+}
+
+.room-equipment-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.room-reserve-link {
+  font-size: 12px;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+}
+
+/* イベント登録フォーム */
+.event-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg3);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.event-form-row {
+  display: flex;
+  gap: 8px;
+}
+
+.event-form-input {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--text1);
+  font-size: 13px;
+}
+
+/* 登録済みイベントのチップ一覧 */
+.event-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.event-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text1);
+  font-size: 14px;
+  cursor: pointer;
+  min-width: 160px;
+}
+
+.event-chip.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, var(--bg3));
+}
+
+.event-chip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 12px;
+}
+
+.event-chip-title {
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.event-chip-spec {
+  color: var(--text2);
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+}
+
+.event-chip-delete {
+  color: var(--text2);
+  flex-shrink: 0;
+}
+
+.event-chip-delete:hover {
+  color: #e05c5c;
+}
+
+/* おすすめ検索条件バー */
+.event-search-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg3);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.event-search-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.event-search-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.event-search-field input,
+.event-search-field select {
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--text1);
+  font-size: 13px;
+}
+
+.room-detail-card-clickable {
+  cursor: pointer;
+}
+
 /* スタッツグリッド: 評価・人気度・距離・費用を2列で表示 */
 .modal-stats  {
 
@@ -1685,4 +1862,127 @@ body  {
     grid-template-columns: 1fr 1fr;
   }
 
+}
+
+/* ===== BRAND BADGE ===== */
+/* ブランドバッジ: カード・モーダル・比較テーブルで共通利用する色分けバッジ */
+.brand-badge  {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 20px;
+}
+
+.brand-badge.sm  {
+  font-size: 10px;
+  padding: 2px 8px;
+  margin-top: 4px;
+}
+
+/* スタジオカードとその下の「空き状況を見る」ボタンをまとめるラッパー */
+.studio-card-wrapper  {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.availability-btn  {
+  align-self: stretch;
+}
+
+/* ===== AVAILABILITY MODAL ===== */
+.availability-date-input  {
+  margin-top: 10px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.availability-room-list  {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.availability-room-header  {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.availability-room-name  {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.availability-room-spec  {
+  font-size: 12px;
+  color: var(--text2);
+}
+
+.availability-slot-list  {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.availability-slot  {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.availability-slot.available  {
+  background: rgba(34,197,94,0.12);
+  border-color: #22c55e;
+  color: #22c55e;
+}
+
+.availability-slot.unavailable  {
+  background: var(--bg3);
+  color: var(--text2);
+  opacity: 0.6;
+}
+
+/* ===== STUDIOS COMPARE LIST (StudiosPage) ===== */
+.studios-compare-list  {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.studio-compare-row  {
+  align-items: flex-start;
+}
+
+.studio-row-address  {
+  font-size: 12px;
+  color: var(--text2);
+  margin: 2px 0 4px;
+}
+
+.room-compare-table  {
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.room-compare-table th, .room-compare-table td  {
+  text-align: left;
+  padding: 4px 10px 4px 0;
+  color: var(--text2);
+}
+
+.room-compare-table th  {
+  font-weight: 600;
+  color: var(--text);
 }

@@ -27,8 +27,9 @@ th { background:#f3e8ff; }
 「何のために」「なぜそれを選んだか」「他のどのサービスと連携しているか」を
 サービス単位でまとめたもの。Lambda関数単位の詳細は<b>詳細設計.html</b>、
 ファイル単位の対応は<b>ファイル構成・依存関係.html</b>を参照。
-本資料は釣行AIアプリ（fishing-ai-app）と同じAWSアカウント上に、完全に独立した
-CloudFormationスタック（<code>studio-search-app</code>）として構築した時点の構成を反映している。
+本資料は、対象を4ブランド（BUZZ／studio worcle／サウンドスタジオNOAH／スタジオミッション）の
+実店舗に絞り、AIによるスコアリング機能を廃止した後の構成を反映している
+（旧構成との差分は企画・設計アーカイブ.html参照）。
 </div>
 
 <hr>
@@ -52,15 +53,20 @@ Cognito User Pool（studio-search-app-users）──外部IdP連携──▶ Goo
 API Gateway（REST API）── CognitoAuthorizerでJWTを検証 ──┐
    │                                                      │
    ▼                                                      │
-Lambda（API系 17関数 / バッチ系 4関数）                    │
+Lambda（API系・バッチ系）                                  │
    │           │            │              │              │
    ▼           ▼            ▼              ▼              ▼
 DynamoDB    S3(Uploads)  SSM Parameter  外部API      （Cognitoへは戻らない）
-(7テーブル)  写真保存      Store（APIキー） Google Places/
-                                          Claude/公式サイト
+(8テーブル)  写真保存      Store（APIキー） Google Places/Claude
 
-【定期実行】
-EventBridge（毎日AM6:00 JST）──▶ generateStudioScoreBatch（Lambda）
+【空き状況の取得（AWS外・ローカル専用）】
+開発者のPC（backend/scripts/scrape_availability.py）
+ ──手動 or ローカルのタスクスケジューラで定期実行──▶ 4ブランド公式サイトをスクレイピング
+ ──AWS認証情報でDynamoDBへ直接書き込み──▶ studio-availability テーブル
+（Lambdaとしてはデプロイしない。クラウド上の定期実行なし）
+
+【定期実行（AWS側）】
+EventBridge（毎日夜間）──▶ sendAnalyticsDigestBatch（Lambda、利用状況の集計メール送信）
 
 【コスト監視】
 AWS Budgets ──▶ メール通知（月$10の80%/100%到達時）
@@ -71,18 +77,25 @@ AWS Budgets ──▶ メール通知（月$10の80%/100%到達時）
 <table>
 <tr><th>サービス</th><th>役割</th><th>主な連携先</th></tr>
 <tr><td>Amazon Cognito</td><td>Googleアカウントでのログイン認証（釣行AIアプリとは別のUser Pool）</td><td>Google（外部IdP）、API Gateway（JWT検証）</td></tr>
-<tr><td>Amazon API Gateway</td><td>フロントからのHTTPリクエストの受付・認証・Lambdaへのルーティング</td><td>Cognito、Lambda（21関数）</td></tr>
+<tr><td>Amazon API Gateway</td><td>フロントからのHTTPリクエストの受付・認証・Lambdaへのルーティング</td><td>Cognito、Lambda（API系Lambda群）</td></tr>
 <tr><td>AWS Lambda</td><td>実際の処理を行うプログラム本体（API系・バッチ系の2パッケージ）</td><td>DynamoDB、S3、SSM、外部API、他のLambda（非同期起動）</td></tr>
-<tr><td>Amazon DynamoDB</td><td>アプリの全データ（スタジオ・おすすめ・投稿・チャット等）の保存先</td><td>Lambda</td></tr>
+<tr><td>Amazon DynamoDB</td><td>アプリの全データ（スタジオ・空き状況・イベント・投稿・チャット等）の保存先</td><td>Lambda、backend/scripts/scrape_availability.py（ローカルから直接書き込み）</td></tr>
 <tr><td>Amazon S3</td><td>①フロントエンドの静的ファイル配信 ②ユーザーがアップロードする写真の保存</td><td>CloudFront（OAC経由、①）、Lambda・ブラウザ直PUT（②）</td></tr>
 <tr><td>Amazon CloudFront</td><td>フロントエンドをCDN経由で高速配信（本番の正系）</td><td>S3（Origin Access Control経由のオリジン）</td></tr>
 <tr><td>Cloudflare Workers（AWS外）</td><td>フロントエンドの無料ミラー配信（独自ドメイン未取得のため）</td><td>フロントのビルド成果物を直接デプロイ（AWSとは独立、Worker名<code>studio-search-app</code>）</td></tr>
 <tr><td>AWS Systems Manager Parameter Store（SSM）</td><td>外部APIキー（Claude・Google Places・Google OAuth）の安全な保管</td><td>Lambda（実行時に取得）。パスは<code>/studio-search/*</code>で釣行AIアプリ（<code>/fishing-ai/*</code>）とは分離</td></tr>
-<tr><td>Amazon EventBridge</td><td>毎日決まった時刻にバッチLambdaを自動起動するスケジューラ</td><td>generateStudioScoreBatch（Lambda）</td></tr>
-<tr><td>AWS Budgets</td><td>AWS利用料が閾値を超えたらメール通知</td><td>Eメール（rfunao0955@gmail.com）</td></tr>
+<tr><td>Amazon EventBridge</td><td>毎日決まった時刻に集計バッチLambdaを自動起動するスケジューラ</td><td>sendAnalyticsDigestBatch（Lambda）</td></tr>
+<tr><td>AWS Budgets</td><td>AWS利用料が閾値を超えたらメール通知</td><td>Eメール</td></tr>
 <tr><td>AWS IAM</td><td>各Lambdaに必要最小限の権限だけを付与</td><td>全AWSサービスへのアクセス制御</td></tr>
 <tr><td>GitHub Actions（AWS外）</td><td>mainブランチへのpushをトリガーに自動デプロイ</td><td>AWS（SAM CLI経由）、Cloudflare、S3、CloudFront</td></tr>
 </table>
+
+<div class="why"><b>ローカル専用スクリプトはAWSサービスとしては扱わない:</b>
+<code>backend/scripts/scrape_availability.py</code>は4ブランドの公式サイトから空き状況・
+広さ・部屋写真・平面図・設備をスクレイピングして<code>studio-availability</code>テーブルへ
+直接書き込むが、Lambdaとしてはデプロイせず、開発者のローカル端末のAWS認証情報を使って
+手動またはローカルのタスクスケジューラで実行する。クラウド上に常駐する処理ではないため、
+上表の「AWSサービス」には含めていない。</div>
 
 <h2>3. 各サービスの詳細</h2>
 
@@ -99,45 +112,57 @@ User Pool単位でしか発行できず、共有するとログイン画面のUR
 
 <h3>■ Amazon API Gateway（REST API）</h3>
 <div class="box">
-フロントエンドが呼び出す全エンドポイント（<code>/recommendations</code>、<code>/chat</code>、
-<code>/posts</code>等）の窓口。ログイン必須のエンドポイントには<code>CognitoAuthorizer</code>を
-アタッチしており、JWTが無効・未提示なら該当Lambdaを呼ばずに401を返す。
+フロントエンドが呼び出す全エンドポイント（<code>/studios</code>、<code>/studios/{studioId}/availability</code>、
+<code>/events</code>、<code>/recommend-studios</code>、<code>/chat</code>、<code>/posts</code>等）の窓口。
+ログイン必須のエンドポイントには<code>CognitoAuthorizer</code>をアタッチしており、JWTが無効・
+未提示なら該当Lambdaを呼ばずに401を返す。
 </div>
 <div class="why"><b>なぜAPI Gateway:</b> Lambdaを直接インターネットに公開せず、認証・CORS・
 ルーティングを一括管理できる。統合タイムアウトが29秒固定という制約があり、これが
-AIチャット（同期呼び出し、Lambda側25秒に短縮）とAI分析（非同期呼び出しに変更）の
-設計判断に直接影響している（詳細設計.html参照）。</div>
+AIチャット（同期呼び出し、Lambda側25秒に短縮）の設計判断に直接影響している
+（詳細設計.html参照）。</div>
 
 <h3>■ AWS Lambda（API系・バッチ系の2パッケージ）</h3>
 <div class="box">
-実処理の本体。<code>backend/lambda/api/</code>（17関数、handlers.py）と
-<code>backend/lambda/batch/</code>（4関数、generate_studio_score.py等）の2つのSAM
-CodeUriパッケージに分かれており、この2つの間でコードは共有できない
-（<code>batch_common.py</code>のようなヘルパーが両パッケージに重複して存在する理由）。
+実処理の本体。<code>backend/lambda/api/</code>（handlers.py）と
+<code>backend/lambda/batch/</code>（discover_studios.py・admin_trigger.py・
+send_analytics_digest.py）の2つのSAM CodeUriパッケージに分かれており、この2つの間で
+コードは共有できない（<code>batch_common.py</code>のようなヘルパーが両パッケージに
+重複して存在する理由）。以前存在していたスコア生成バッチ
+（<code>generate_studio_score.py</code>／<code>generateStudioScoreBatch</code>）は、
+AIスコアリング機能の廃止にともない完全に削除した。
 </div>
 <div class="why"><b>なぜLambda（サーバーレス）:</b> 個人利用規模のトラフィックでは
 「常時起動のサーバー」は過剰投資になる。呼ばれた時だけ課金される従量課金と、
 インフラ管理不要な点を重視した。</div>
 <div class="why"><b>Lambda関数名を固定しなかった理由:</b> 当初<code>FunctionName</code>を
-釣行AIアプリと同じ命名（<code>getRecommendationsHandler</code>等）で固定していたところ、
-Lambda関数名はリージョン内でアカウント共通の一意制約があるため、既に稼働している
-釣行AIアプリの同名関数と衝突し、初回デプロイが<code>AWS::EarlyValidation::ResourceExistenceCheck</code>
-エラーで失敗した。全Lambdaの<code>FunctionName</code>指定を削除し、CloudFormationに
-自動採番させる形に修正することで解消した。</div>
+釣行AIアプリと同じ命名で固定していたところ、Lambda関数名はリージョン内でアカウント共通の
+一意制約があるため、既に稼働している釣行AIアプリの同名関数と衝突し、初回デプロイが
+<code>AWS::EarlyValidation::ResourceExistenceCheck</code>エラーで失敗した。全Lambdaの
+<code>FunctionName</code>指定を削除し、CloudFormationに自動採番させる形に修正することで
+解消した。</div>
 
-<h3>■ Amazon DynamoDB（7テーブル）</h3>
+<h3>■ Amazon DynamoDB（8テーブル）</h3>
 <table>
 <tr><th>テーブル名</th><th>役割</th></tr>
-<tr><td>studio-studios</td><td>スタジオマスタ（座標・名前・設備・収容人数・最寄り駅距離・料金・写真URL等）</td></tr>
-<tr><td>studio-recommendations</td><td>スタジオごとの最新スコア・AIコメント（1スタジオ1件、上書き型）</td></tr>
+<tr><td>studio-studios</td><td>4ブランドの店舗マスタ（座標・名前・公式サイトURL・部屋マスタ配列。部屋ごとの広さ・料金・予約リンク・写真・平面図・設備を含む）</td></tr>
+<tr><td>studio-availability</td><td>日付ごとの空き状況（30分刻みのタイムスロット）。<code>scrape_availability.py</code>がローカルから書き込む</td></tr>
+<tr><td>studio-events</td><td>ユーザーが登録する「次のイベント」（イベント名・ステージ横幅／奥行き・出演人数）。新規テーブル</td></tr>
 <tr><td>studio-favorites</td><td>お気に入り登録</td></tr>
 <tr><td>studio-posts</td><td>レビュー投稿（本文・写真・★評価）</td></tr>
 <tr><td>studio-chats</td><td>AI相談チャットの会話履歴</td></tr>
 <tr><td>studio-usage</td><td>1日あたりのAI/API呼び出し回数（レート制限用、TTLで自動削除）</td></tr>
 <tr><td>studio-users</td><td>ユーザーの表示名（ユーザー名）</td></tr>
+<tr><td>studio-analytics-events</td><td>アプリ内の操作イベントログ（集計バッチが日次でダイジェストメールを送るための元データ、TTLで自動削除）</td></tr>
 </table>
+<div class="box">
+<b>studio-recommendations テーブルは削除済み。</b> AIスコア・おすすめTOP3を保存していた
+テーブルだが、スコアリング機能の廃止にともない完全に削除した。かわりに
+<code>studio-availability</code>（空き状況）と<code>studio-events</code>（次のイベント）を
+新設している。
+</div>
 <div class="why"><b>なぜDynamoDB:</b> スキーマがシンプルでアクセスパターンも
-単純（PK検索・全件scan中心）なため、RDBのような複雑なクエリは不要。
+単純（PK検索・PK+SK範囲検索・全件scan中心）なため、RDBのような複雑なクエリは不要。
 PAY_PER_REQUESTモードで使った分だけ課金され、サーバーレスLambdaとの相性も良い。</div>
 
 <h3>■ Amazon S3（2バケット）</h3>
@@ -179,18 +204,20 @@ Claude APIキー（<code>/studio-search/anthropic-api-key</code>）、Google Pla
 （<code>/studio-search/google-places-api-key</code>）、Google OAuthクライアントID/シークレット
 （<code>/studio-search/google-oauth-client-id</code>・<code>-secret</code>）をSSMに保管。
 Lambdaの環境変数に直書きせず、実行時に<code>ssm:GetParameter</code>で取得する。
+ミッションブランドの会員ログイン情報（<code>MISSION_LOGIN_EMAIL</code>／
+<code>MISSION_LOGIN_PASSWORD</code>）はSSMではなく、ローカル専用の
+<code>backend/.env</code>（Gitには含めず<code>.env.example</code>のみコミット）に保存しており、
+<code>scrape_availability.py</code>がローカル実行時にのみ読み込む。
 </div>
 <div class="why"><b>なぜ釣行AIアプリと別パスか:</b> AnthropicのAPIキー自体（クレジット残高）は
 釣行AIアプリと共有してよい前提だが、Lambdaごとの権限スコープ（IAMポリシーが参照する
-パラメータ名）を綺麗に保つため、登録パス自体は<code>/fishing-ai/*</code>とは分離している。
-実際、両アプリのAnthropicキー・Google Placesキーは同じ値を使い回して登録した。</div>
+パラメータ名）を綺麗に保つため、登録パス自体は<code>/fishing-ai/*</code>とは分離している。</div>
 
 <h3>■ Amazon EventBridge</h3>
 <div class="box">
-<code>cron(0 21 * * ? *)</code>（UTC 21:00 = 日本時間AM6:00）で
-<code>generateStudioScoreBatch</code>を毎日自動起動し、全スタジオのスコアを
-最新化する。ユーザーが「AI分析を実行」ボタンを押さなくても、朝には最新の
-おすすめが用意されている状態を作るための仕組み。
+毎日決まった時刻に<code>sendAnalyticsDigestBatch</code>を自動起動し、アプリの利用状況を
+集計してダイジェストメールを送る。以前存在していた「毎日AM6:00 JSTにスコアを再計算する
+EventBridgeルール」は、スコアリング機能の廃止にともない削除した。
 </div>
 
 <h3>■ AWS Budgets</h3>
@@ -200,14 +227,14 @@ Lambdaの環境変数に直書きせず、実行時に<code>ssm:GetParameter</co
 <code>studio-search-app-monthly</code>）。ただしこれはAWS側の課金のみを見ており、
 Google Cloud（Places/Maps）やAnthropic（Claude）の課金はAWSの外で発生するため対象外。
 それぞれGoogle Cloud ConsoleとAnthropic Console側で別途予算アラート・spend limitの
-設定が必要（README.md「10. 利用料アラート」参照）。
+設定が必要（README.md参照）。
 </div>
 
 <h3>■ AWS IAM（最小権限方針）</h3>
 <div class="box">
 各Lambda関数には、その関数が実際に必要とするDynamoDBテーブル・S3バケット・
 SSMパラメータへのアクセス権限だけをSAMの<code>Policies</code>（
-<code>DynamoDBCrudPolicy</code>・<code>S3WritePolicy</code>・
+<code>DynamoDBCrudPolicy</code>・<code>DynamoDBReadPolicy</code>・
 <code>SSMParameterReadPolicy</code>等）で個別に付与している。
 例えば<code>GetStudiosFunction</code>はStudiosテーブルの読み取りしかできず、
 書き込みや他テーブルへのアクセス権限は持たない。
@@ -224,32 +251,48 @@ SSMパラメータへのアクセス権限だけをSAMの<code>Policies</code>�
  → フロントがJWTを保持し、以後のAPIリクエストにAuthorizationヘッダーとして付与
 </pre>
 
-<h3>② 「AI分析を実行」ボタン</h3>
+<h3>② スタジオ一覧・空き状況の閲覧</h3>
 <pre>
-フロント → API Gateway → adminRunAiBatch（Lambda、UsageTableでレート制限チェック）
- → generateStudioScoreBatch を非同期起動して即202を返す
- → generateStudioScoreBatch が裏側で実行:
-    StudiosTable全件取得
-     → discover_studios.run_discovery()で新規スタジオ探索（Google Places API、SSMからキー取得）
-        新規候補ごとに: 設備推測・収容人数推測（Claude）、最寄り駅検索（Places Nearby Search）、
-        公式サイト取得＋料金抽出（Place Details→サイト取得→Claude）
-     → スコア計算（ルールベース、最寄り駅距離を使用）
-     → スコアが大きく動いたスタジオのみClaude APIで理由文生成（SSMからキー取得）
-     → RecommendationsTableへ保存
- → フロントは GET /recommendations を数秒おきにポーリングして完了を検知
+フロント（TopPage）→ API Gateway → getStudiosHandler（Lambda）
+ → StudiosTableから4ブランドのスタジオ一覧を取得（未ログインでも可能）
+フロント「空き状況を見る」→ API Gateway → getStudioAvailabilityHandler（Lambda）
+ → AvailabilityTableから該当studioId・日付のデータを取得
+   （データが無い日は rooms: [] / scrapedAt: null を返し、エラーにはしない）
 </pre>
 
-<h3>③ AI相談チャット（画像添付あり）</h3>
+<h3>③ 空き状況の取得（ローカル、AWS外）</h3>
+<pre>
+開発者PC上で python backend/scripts/scrape_availability.py を実行
+ → BeautifulSoup（静的HTML）またはPlaywright（JS描画・会員ログインが必要なサイト）で
+   4ブランドの公式サイトから空き状況・広さ・写真・平面図・設備を取得
+ → ローカルのAWS認証情報を使い、DynamoDB（AvailabilityTable）へ直接put_item
+   （API Gateway/Lambdaを経由しない）
+</pre>
+
+<h3>④ イベント登録とおすすめ検索</h3>
+<pre>
+フロント（EventsPage）→ API Gateway（CognitoAuthorizerでJWT検証）
+ → postEventsHandler（Lambda）→ EventsTableへ保存
+フロント「おすすめを探す」（目的・日付・時間帯を指定）
+ → API Gateway → getRecommendedStudiosHandler（Lambda）
+ → EventsTableからイベント（ステージ実寸・出演人数）を取得
+ → 目的（振り入れ=2.5㎡/人、構成=1.8㎡/人）から必要な広さを算出
+ → StudiosTableの部屋マスタから広さ条件を満たす部屋を抽出
+ → AvailabilityTableで指定日時のslotsを確認し、空きのある部屋だけに絞り込み
+ → 条件を満たす部屋一覧を返却（スコアリングはしない単純な絞り込み）
+</pre>
+
+<h3>⑤ AI相談チャット（画像添付あり）</h3>
 <pre>
 フロント → API Gateway（CognitoAuthorizerでJWT検証）→ postChatHandler
  → UsageTableでレート制限チェック（1日30件）
  → S3(Uploads)から画像バイトを取得
- → StudiosTable・RecommendationsTableをscanして実データのコンテキストを構築
+ → StudiosTableをscanして実データのコンテキストを構築
  → Claude APIへテキスト＋画像＋実データコンテキストを送信（SSMからキー取得）
  → 応答をChatsTableに保存し、同期的にフロントへ返却
 </pre>
 
-<h3>④ 写真アップロード（レビュー投稿・スタジオ写真）</h3>
+<h3>⑥ 写真アップロード（レビュー投稿・スタジオ写真）</h3>
 <pre>
 フロント → presignUploadHandler（Lambda）が署名付きPOSTフォームを発行
  → ブラウザがS3(Uploads)へ直接POST（Lambda/API Gatewayを経由しない）
@@ -260,13 +303,12 @@ SSMパラメータへのアクセス権限だけをSAMの<code>Policies</code>�
 <ul>
 <li><b>サーバーレス徹底:</b> 個人利用規模のトラフィックに対して常時稼働のサーバーは過剰。
 使った分だけ課金されるLambda・DynamoDB・S3（+CloudFront）で構成し、待機コストをゼロに近づけている</li>
-<li><b>バッチ中心・リアルタイム処理の排除:</b> スコア計算はEventBridgeの日次バッチと手動実行の
-2経路に絞り、常時ポーリングするような設計を避けている</li>
-<li><b>実データとAI生成の分離:</b> 座標・実在性・料金など「間違えられないデータ」は
-Google Places APIや公式サイトの実テキストのみを情報源とし、AI（Claude）は説明文生成や
-設備・収容人数の推測など「間違っても実害が小さい付随情報」にのみ使う
-（ハルシネーション対策。料金抽出も「サイトに書いてあれば数字を返す、無ければ不明」であり
-AIが金額を作り出すことはない）</li>
+<li><b>スクレイピングはクラウドに乗せない:</b> 4ブランドの公式サイトの構造が大きく異なり、
+一部は会員ログインやJavaScript描画への対応が必要なため、Lambdaでの常時運用ではなく
+ローカル専用スクリプト＋手動/タスクスケジューラ実行という割り切った構成にしている</li>
+<li><b>実データとAIの役割の縮小:</b> スコアリング機能の廃止にともない、AI（Claude）の役割は
+AI相談チャットの応答生成のみに縮小した。座標・実店舗の実在性など「間違えられないデータ」は
+Google Places APIや公式サイトの実データのみを情報源とし、AIには生成させない方針は維持している</li>
 <li><b>最小権限のIAM:</b> Lambdaごとに必要なリソースへのアクセス権限だけを絞って付与</li>
 <li><b>コスト保護の多層化:</b> ①ユーザー単位の1日あたりレート制限（UsageTable）、
 ②AWS Budgets（AWS利用料）、③Google Cloud・Anthropic Console側の予算アラート（AWS外の課金）、

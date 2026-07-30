@@ -23,10 +23,9 @@ code { background:#eee; padding:1px 4px; border-radius:3px; }
 
 <div class="box">
 本書は「どの画面が何をするか」「どのファイルがどのファイルを読んでいるか」を一覧できるようにするための
-リファレンス。釣行AIアプリ（fishing-ai-app）の同名資料をベースに、ドメイン変換
-（Spots→Studios等）と、スコアリング刷新（口コミ・設備・最寄り駅距離・収容人数・料金）を
-反映した最新版。仕様の背景・意思決定理由は AWS構成・サービス連携.html／詳細設計.html／
-企画・設計アーカイブ.html を参照。
+リファレンス。対象を4ブランド（BUZZ／studio worcle／サウンドスタジオNOAH／スタジオミッション）の
+実店舗に絞り、AIスコアリング機能を廃止した後の最新構成を反映している。仕様の背景・意思決定理由は
+AWS構成・サービス連携.html／詳細設計.html／企画・設計アーカイブ.html を参照。
 </div>
 
 <hr>
@@ -35,26 +34,27 @@ code { background:#eee; padding:1px 4px; border-radius:3px; }
 
 <table>
 <tr><th>URL</th><th>画面名</th><th>ページファイル</th><th>やること</th></tr>
-<tr><td><code>/</code></td><td>おすすめ</td><td><code>pages/TopPage.tsx</code></td><td>AIスコア順のTOP3・一覧表示、AI分析実行、現在地から新スタジオ探索、現在地基準の再ランキング</td></tr>
-<tr><td><code>/map</code></td><td>地図</td><td><code>pages/MapPage.tsx</code></td><td>Google Maps上に全スタジオをスコア色分けピン表示</td></tr>
-<tr><td><code>/studios</code></td><td>スタジオ</td><td><code>pages/StudiosPage.tsx</code></td><td>全スタジオ一覧（スコア・設備・ナビリンク）、キーワード・設備タグでの絞り込み</td></tr>
+<tr><td><code>/</code></td><td>トップ（スタジオ一覧）</td><td><code>pages/TopPage.tsx</code></td><td>4ブランドのスタジオをカード表示。ブランド・エリア・部屋の広さで絞り込み。「空き状況を見る」でAvailabilityModalを開きタイムテーブル表示。「現在地から探す」ボタンも維持</td></tr>
+<tr><td><code>/map</code></td><td>地図</td><td><code>pages/MapPage.tsx</code></td><td>Google Maps上に全スタジオをブランド色分けピン表示（スコアによる色分けは廃止）</td></tr>
+<tr><td><code>/studios</code></td><td>スタジオ比較</td><td><code>pages/StudiosPage.tsx</code></td><td>スタジオ×部屋の広さを比較できる一覧表（スコア表示は廃止）</td></tr>
 <tr><td><code>/favorites</code></td><td>保存済み</td><td><code>pages/FavoritesPage.tsx</code></td><td>お気に入り登録済みスタジオのみ表示</td></tr>
+<tr><td><code>/events</code></td><td>イベント（新規）</td><td><code>pages/EventsPage.tsx</code></td><td>ログイン必須。「次のイベント」（イベント名・ステージ横幅/奥行き・出演人数）の登録・削除。登録済みイベント・目的（振り入れ/構成）・日付・時間・利用時間を指定して「おすすめを探す」→ 条件を満たすスタジオ・部屋の一覧を表示</td></tr>
 <tr><td><code>/posts</code></td><td>レビュー</td><td><code>pages/PostsPage.tsx</code></td><td>レビュー投稿（★評価・本文・写真）の一覧・作成・編集・削除。編集は本人の投稿のみ、投稿先スタジオは変更不可</td></tr>
-<tr><td><code>/chat</code></td><td>AI相談</td><td><code>pages/ChatPage.tsx</code></td><td>写真添付対応のAIチャット、会話履歴、送信済みメッセージの編集。実データ（Studios/Recommendations）に基づいた回答</td></tr>
+<tr><td><code>/chat</code></td><td>AI相談</td><td><code>pages/ChatPage.tsx</code></td><td>写真添付対応のAIチャット、会話履歴、送信済みメッセージの編集。実データ（Studios）に基づいた回答</td></tr>
 <tr><td><code>/guide</code></td><td>使い方</td><td><code>pages/GuidePage.tsx</code></td><td>画面ごとの使い方・ホーム画面への追加手順・FAQ</td></tr>
 </table>
 
 <div class="box">
 ルーティング定義は <code>App.tsx</code>。全ページ共通のヘッダーは <code>components/NavBar.tsx</code>
-（ロゴクリックで <code>/</code> に戻る、モバイルではラベル非表示、右端にログイン状態を表示）。<br>
-<b>ログイン不要（閲覧）</b>: おすすめ・地図・スタジオ・レビュー投稿の一覧表示。<br>
-<b>ログイン必須（操作）</b>: お気に入り登録/削除、投稿の作成/編集/削除、AI相談、AI分析実行、現在地から新スタジオ探索
-（Places/Claude APIのコスト保護のため）。
+（ロゴクリックで <code>/</code> に戻る、モバイルではラベル非表示、右端にログイン状態を表示。
+<b>「イベント」タブを新規追加</b>）。<br>
+<b>ログイン不要（閲覧）</b>: スタジオ一覧・空き状況・地図・スタジオ比較・レビュー投稿の一覧表示。<br>
+<b>ログイン必須（操作）</b>: お気に入り登録/削除、投稿の作成/編集/削除、AI相談、
+イベントの登録/削除/おすすめ検索、現在地から探す（Places APIのコスト保護のため）。<br>
 未ログインでこれらを操作しようとするとCognito Hosted UI（Googleログイン画面）へ自動遷移するか
-（お気に入り・投稿作成・AI分析実行・新スタジオ探索）、ページ自体がログイン案内を表示する（AI相談）。<br>
-TOP3カード（<code>RecommendationCard.tsx</code>）はスタジオ写真が登録されている場合、
-カード上部にヒーロー写真を表示する（その他一覧・お気に入り一覧はホバー/長押しプレビューのみ）。
-釣行AIアプリの釣具店検索に相当する機能は本アプリには無い（v1では対象外）。
+（お気に入り・投稿作成・現在地から探す）、ページ自体がログイン案内を表示する（AI相談・イベント）。<br>
+「AI分析を実行」ボタンおよびそれに関連するUI（AiBatchButton.tsx、TOP3表示）は
+スコアリング機能の廃止にともない<b>削除済み</b>。
 </div>
 
 <h2>2. フロントエンド ファイル依存関係</h2>
@@ -63,10 +63,11 @@ TOP3カード（<code>RecommendationCard.tsx</code>）はスタジオ写真が�
 
 <table>
 <tr><th>ページ</th><th>使用するフック</th><th>使用する主なコンポーネント</th></tr>
-<tr><td>TopPage.tsx</td><td>useRecommendations, useFavorites</td><td>RecommendationCard, AiBatchButton, StudioDiscoveryButton, DetailModal, NearbyModal</td></tr>
+<tr><td>TopPage.tsx</td><td>useFavorites（api/client.getStudiosを直接呼ぶ）</td><td>StudioCard, StudioDiscoveryButton, DetailModal, NearbyModal, AvailabilityModal</td></tr>
 <tr><td>MapPage.tsx</td><td>（なし。api/client を直接呼ぶ）</td><td>@vis.gl/react-google-maps（外部ライブラリ）</td></tr>
 <tr><td>StudiosPage.tsx</td><td>（なし。api/client を直接呼ぶ）</td><td>ImagePreviewPopover</td></tr>
-<tr><td>FavoritesPage.tsx</td><td>useFavorites, useRecommendations</td><td>RecommendationCard, DetailModal</td></tr>
+<tr><td>FavoritesPage.tsx</td><td>useFavorites</td><td>StudioCard, DetailModal</td></tr>
+<tr><td>EventsPage.tsx</td><td>（なし。api/client を直接呼ぶ）</td><td>DetailModal（おすすめ結果からスタジオ詳細を開く用）</td></tr>
 <tr><td>PostsPage.tsx</td><td>usePosts</td><td>PostForm</td></tr>
 <tr><td>ChatPage.tsx</td><td>useChat</td><td>ChatInput, ChatHistoryPanel</td></tr>
 <tr><td>GuidePage.tsx</td><td>（なし。静的コンテンツのみ）</td><td>（なし）</td></tr>
@@ -76,21 +77,28 @@ TOP3カード（<code>RecommendationCard.tsx</code>）はスタジオ写真が�
 
 <table>
 <tr><th>コンポーネント</th><th>使われる場所</th><th>内部で使うもの</th></tr>
-<tr><td>RecommendationCard.tsx</td><td>TopPage, FavoritesPage, NearbyModal</td><td>utils/score.ts, ImagePreviewPopover</td></tr>
-<tr><td>DetailModal.tsx</td><td>TopPage, FavoritesPage, NearbyModal</td><td>utils/score.ts, ImagePreviewPopover, api/client（写真アップロード）</td></tr>
-<tr><td>NearbyModal.tsx</td><td>TopPage</td><td>hooks/useGeolocation, utils/distance.ts, utils/score.ts, RecommendationCard</td></tr>
-<tr><td>ImagePreviewPopover.tsx</td><td>RecommendationCard, StudiosPage, DetailModal</td><td>hooks/useLongPress（imageUrlのみ表示。釣行AIアプリのWikipedia画像フォールバックは対象外のため無し）</td></tr>
+<tr><td>StudioCard.tsx</td><td>TopPage, FavoritesPage, NearbyModal</td><td>utils/brand.ts（ブランドラベル・色）, ImagePreviewPopover, api/client（recordAnalyticsEvent）</td></tr>
+<tr><td>AvailabilityModal.tsx</td><td>TopPage（新規）</td><td>api/client（getStudioAvailability）。日付選択＋部屋ごとの30分刻みタイムテーブル表示。データが無い日は「空き状況の情報がありません」と表示</td></tr>
+<tr><td>DetailModal.tsx</td><td>TopPage, FavoritesPage, NearbyModal, EventsPage</td><td>ImagePreviewPopover, api/client（写真アップロード・recordAnalyticsEvent）。部屋一覧に写真・平面図・設備タグ・「この部屋を公式サイトで見る」リンクを表示。予約ボタンはstudio.websiteが無い場合studio.sourceUrlにフォールバック</td></tr>
+<tr><td>NearbyModal.tsx</td><td>TopPage</td><td>hooks/useGeolocation, utils/distance.ts, StudioCard</td></tr>
+<tr><td>ImagePreviewPopover.tsx</td><td>StudioCard, StudiosPage, DetailModal</td><td>hooks/useLongPress（imageUrlのみ表示）</td></tr>
 <tr><td>PostForm.tsx</td><td>PostsPage</td><td>api/client（署名付きアップロード・投稿作成）。★評価入力UIを含む</td></tr>
 <tr><td>ChatInput.tsx / ChatHistoryPanel.tsx</td><td>ChatPage</td><td>（propsで受けたコールバックのみ）ChatInputはhooks/useGeolocationで現在地共有トグルを実装</td></tr>
-<tr><td>AiBatchButton.tsx / StudioDiscoveryButton.tsx</td><td>TopPage</td><td>StudioDiscoveryButtonのみ api/client（runStudioDiscovery）を直接呼ぶ</td></tr>
+<tr><td>StudioDiscoveryButton.tsx</td><td>TopPage</td><td>api/client（runStudioDiscovery）を直接呼ぶ</td></tr>
 <tr><td>ProfileModal.tsx</td><td>NavBar</td><td>（propsで受けたコールバックのみ。API直呼びなし）</td></tr>
 </table>
+
+<div class="box">
+<b>削除済みコンポーネント:</b> <code>RecommendationCard.tsx</code>（スコア・TOP3表示用）、
+<code>AiBatchButton.tsx</code>（「AI分析を実行」ボタン）は、AIスコアリング機能の廃止に
+ともない削除した。<code>StudioCard.tsx</code>が旧<code>RecommendationCard.tsx</code>の
+表示ロジックを引き継ぎつつ、スコア表示部分を除いた形になっている。
+</div>
 
 <h3>2.3 フック → APIクライアント</h3>
 
 <table>
 <tr><th>フック</th><th>呼び出す api/client.ts の関数</th></tr>
-<tr><td>useRecommendations.ts</td><td>getRecommendations, runAiBatch（未ログイン時はrunAiBatch実行前にsigninRedirect）</td></tr>
 <tr><td>useFavorites.ts</td><td>getFavorites, addFavorite, removeFavorite（未ログイン時はfetchせず空配列、トグル時はsigninRedirect）</td></tr>
 <tr><td>usePosts.ts</td><td>getPosts, createPost, updatePost, deletePost（削除失敗時はdeleteErrorに反映）</td></tr>
 <tr><td>useChat.ts</td><td>sendChatMessage, editChatMessage, getChatHistory, getChat, deleteChat, getPresignedUploadUrl, uploadImageToS3（429応答はレート制限メッセージとして表示。lat/lngを渡せる）</td></tr>
@@ -101,8 +109,11 @@ TOP3カード（<code>RecommendationCard.tsx</code>）はスタジオ写真が�
 
 <div class="box">
 <code>api/client.ts</code> が全エンドポイント呼び出しを一手に引き受ける唯一の窓口（共有axiosインスタンス）。
-釣行AIアプリにあった魚種画像取得用の <code>api/wikipedia.ts</code> は、対応する「設備画像」の概念が
-無いため本アプリには存在しない。
+新規追加された関数として <code>getStudioAvailability</code>（GET /studios/{studioId}/availability）、
+<code>getEvents</code> / <code>createEvent</code> / <code>deleteEvent</code>（/events系）、
+<code>getRecommendedStudios</code>（GET /recommend-studios）がある。
+<b>削除済み:</b> <code>getRecommendations</code>、<code>runAiBatch</code>
+（POST /admin/run-ai-batch呼び出し）は、対応するバックエンドAPIの削除にともない削除した。
 </div>
 
 <h3>2.4 認証まわりのファイル</h3>
@@ -123,19 +134,31 @@ TOP3カード（<code>RecommendationCard.tsx</code>）はスタジオ写真が�
 
 <table>
 <tr><th>ファイル</th><th>内容</th><th>ユニットテスト</th></tr>
-<tr><td>utils/score.ts</td><td>スコア→色/ラベル変換、評価・人気度アイコン変換、距離ベースのスコア近似再計算</td><td>utils/score.test.ts</td></tr>
+<tr><td>utils/brand.ts</td><td>4ブランド（BUZZ/worcle/NOAH/ミッション）の一覧（BRANDS）、表示ラベル（BRAND_LABELS）、地図・カードの色分け（BRAND_COLORS）</td><td>-</td></tr>
+<tr><td>utils/area.ts</td><td>スタジオ住所からの都道府県名抽出（エリア絞り込み用）</td><td>utils/area.test.ts</td></tr>
 <tr><td>utils/distance.ts</td><td>haversine公式による2点間距離計算</td><td>utils/distance.test.ts</td></tr>
-<tr><td>types/index.ts</td><td>Studio/Recommendation/Favorite/Post/Chat等、全体で共有する型定義</td><td>-</td></tr>
+<tr><td>types/index.ts</td><td>Studio/Room/StudioAvailability/StudioEvent/Favorite/Post/Chat等、全体で共有する型定義</td><td>-</td></tr>
 </table>
 
-<h2>3. バックエンド ファイル構成（Lambda）</h2>
+<div class="box">
+<b>削除済みユーティリティ:</b> <code>utils/score.ts</code>（スコア→色/ラベル変換、距離ベースの
+スコア近似再計算）は、スコアリング機能の廃止にともない削除した。地図・カードの色分けは
+<code>utils/brand.ts</code>のブランド別配色に置き換えている。
+</div>
+
+<h2>3. バックエンド ファイル構成（Lambda・ローカルスクリプト）</h2>
 
 <h3>3.1 API系（backend/lambda/api/handlers.py 1ファイルに集約）</h3>
 
 <table>
 <tr><th>関数</th><th>エンドポイント</th><th>認証</th><th>読み書きするテーブル/バケット</th></tr>
-<tr><td>getRecommendationsHandler</td><td>GET /recommendations</td><td>不要</td><td>Recommendations（読）, Studios（読、結合用）</td></tr>
-<tr><td>getStudiosHandler</td><td>GET /studios</td><td>不要</td><td>Studios（読）</td></tr>
+<tr><td>getStudiosHandler</td><td>GET /studios</td><td>不要</td><td>Studios（読、対象4ブランドのみフィルタ）</td></tr>
+<tr><td>getStudioAvailabilityHandler</td><td>GET /studios/{studioId}/availability</td><td>不要</td><td>Availability（読。データ無し時はrooms:[]/scrapedAt:nullで200）</td></tr>
+<tr><td>postAnalyticsEventHandler</td><td>POST /analytics/event</td><td>不要</td><td>AnalyticsEvents（作成）</td></tr>
+<tr><td>getEventsHandler</td><td>GET /events</td><td>必須</td><td>Events（読、userIdでquery）</td></tr>
+<tr><td>postEventsHandler</td><td>POST /events</td><td>必須</td><td>Events（作成）</td></tr>
+<tr><td>deleteEventHandler</td><td>DELETE /events/{eventId}</td><td>必須</td><td>Events（削除）</td></tr>
+<tr><td>getRecommendedStudiosHandler</td><td>GET /recommend-studios</td><td>必須</td><td>Events（読）, Studios（読）, Availability（読）。広さ・空き状況の両方を満たす部屋のみ抽出</td></tr>
 <tr><td>putStudioImageHandler</td><td>PUT /studios/{studioId}/image</td><td>必須</td><td>Studios（更新）</td></tr>
 <tr><td>getPostsHandler</td><td>GET /posts</td><td>不要</td><td>Posts（読）, Users（読、投稿者の表示名を結合）</td></tr>
 <tr><td>postPostsHandler</td><td>POST /posts</td><td>必須</td><td>Posts（作成。userIdは_get_user_id(event)で取得しリクエストボディの値は無視）</td></tr>
@@ -145,7 +168,7 @@ TOP3カード（<code>RecommendationCard.tsx</code>）はスタジオ写真が�
 <tr><td>postFavoritesHandler</td><td>POST /favorites</td><td>必須</td><td>Favorites（作成）</td></tr>
 <tr><td>deleteFavoritesHandler</td><td>DELETE /favorites/{studioId}</td><td>必須</td><td>Favorites（削除）</td></tr>
 <tr><td>postPresignUploadHandler</td><td>POST /uploads/presign</td><td>必須</td><td>S3 UploadsBucket（署名付きPOSTフォーム発行のみ）</td></tr>
-<tr><td>postChatHandler</td><td>POST /chat</td><td>必須</td><td>Chats（読み書き）, Usage（1日あたり利用回数のアトミック加算）, Studios・Recommendations（読、実データグラウンディング用）, S3（画像読み取り）, SSM（Claudeキー）</td></tr>
+<tr><td>postChatHandler</td><td>POST /chat</td><td>必須</td><td>Chats（読み書き）, Usage（1日あたり利用回数のアトミック加算）, Studios（読、実データグラウンディング用）, S3（画像読み取り）, SSM（Claudeキー）</td></tr>
 <tr><td>getChatsHandler</td><td>GET /chats</td><td>必須</td><td>Chats（読、軽量版）</td></tr>
 <tr><td>getChatHandler</td><td>GET /chats/{chatId}</td><td>必須</td><td>Chats（読、全メッセージ）</td></tr>
 <tr><td>deleteChatHandler</td><td>DELETE /chats/{chatId}</td><td>必須</td><td>Chats（削除）</td></tr>
@@ -154,11 +177,16 @@ TOP3カード（<code>RecommendationCard.tsx</code>）はスタジオ写真が�
 </table>
 
 <div class="box">
+<b>削除済みハンドラー:</b> <code>getRecommendationsHandler</code>（GET /recommendations）は、
+RecommendationsTableごと削除されたAIスコアリング機能の廃止にともない削除した。
+</div>
+
+<div class="box">
 「認証必須」のエンドポイントは <code>template.yaml</code> の <code>Api</code> リソースに定義した
 <code>CognitoAuthorizer</code>（Cognito User Pool Authorizer）を通過して初めて呼び出せる。
 通過後のイベントには <code>event.requestContext.authorizer.claims.sub</code>
 にユーザーの一意なID（Cognitoのsub）が入り、<code>_get_user_id(event)</code> ヘルパーがこれを取得する
-（Favorites/Chatsテーブルは元々userIdがpartition keyの一部のため、他人になりすまして
+（Favorites/Chats/Eventsテーブルは元々userIdがpartition keyの一部のため、他人になりすまして
 アクセスすること自体ができない設計。PostsテーブルだけpostId単一PKのため上記の通り明示チェックが必要）。
 </div>
 
@@ -166,30 +194,55 @@ TOP3カード（<code>RecommendationCard.tsx</code>）はスタジオ写真が�
 
 <table>
 <tr><th>ファイル</th><th>役割</th><th>他ファイルとの関係</th></tr>
-<tr><td>batch_common.py</td><td>DynamoDB/SSM/HTTP GETの共有ヘルパー。get_user_id/check_and_increment_daily_usage（handlers.pyの同名関数と同じロジックのapi/非依存版、コスト保護レート制限用）</td><td>generate_studio_score.py・discover_studios.py・admin_trigger.py から import される（循環import回避のため切り出し）</td></tr>
-<tr><td>generate_studio_score.py</td><td>generateStudioScoreBatch本体。口コミ評価・人気度・設備・最寄り駅距離・料金からスコア計算→Claude推薦理由生成→Recommendations保存</td><td>batch_common を import。handler冒頭で discover_studios.run_discovery() を呼ぶ（新スタジオ探索も内包）</td></tr>
-<tr><td>discover_studios.py</td><td>Google Places APIで新規スタジオを探索しStudiosへ追加する中核ロジック（run_discovery）。新規候補ごとに設備・収容人数の推測（Claude）、最寄り駅検索（Places Nearby Search）、公式サイト取得＋料金抽出（Place Details→サイト取得→Claude）を行う</td><td>batch_common を import。generate_studio_score.py から呼ばれる他、discoverStudiosBatch Lambdaとしても単独稼働</td></tr>
-<tr><td>admin_trigger.py</td><td>フロントのボタンから対象バッチをEvent(非同期)invokeする汎用ラッパー。環境変数RATE_LIMIT_ACTION/RATE_LIMIT_DAILYでコスト保護のレート制限を実装（上限超過時はバッチを起動せず429）</td><td>環境変数 BATCH_FUNCTION_NAME により、同一コードが adminRunAiBatch と adminRunStudioDiscovery の2つのLambdaとして再利用されている（レート制限の上限値もこの環境変数で関数ごとに変えている）</td></tr>
+<tr><td>batch_common.py</td><td>DynamoDB/SSM/HTTP GETの共有ヘルパー。get_user_id/check_and_increment_daily_usage（handlers.pyの同名関数と同じロジックのapi/非依存版、コスト保護レート制限用）</td><td>discover_studios.py・admin_trigger.py から import される（循環import回避のため切り出し）</td></tr>
+<tr><td>discover_studios.py</td><td>Google Places APIで4ブランドの新規店舗候補を探索しStudiosへ追加する中核ロジック（run_discovery）。店名から4ブランドいずれかにマッチしない候補は登録しない（detect_brand）</td><td>batch_common を import。discoverStudiosBatch Lambdaとして稼働</td></tr>
+<tr><td>admin_trigger.py</td><td>フロントのボタンから対象バッチをEvent(非同期)invokeする汎用ラッパー。環境変数RATE_LIMIT_ACTION/RATE_LIMIT_DAILYでコスト保護のレート制限を実装（上限超過時はバッチを起動せず429）</td><td>adminRunStudioDiscovery Lambdaとして稼働（BATCH_FUNCTION_NAME=DiscoverStudiosBatch）</td></tr>
+<tr><td>send_analytics_digest.py</td><td>直近24時間の閲覧数・予約クリック数を集計しSESでメール通知</td><td>batch_common には依存しない独立モジュール。sendAnalyticsDigestBatchとしてEventBridgeから起動</td></tr>
 </table>
 
 <div class="box">
-<code>backend/scripts/backfill_studio_details.py</code> はLambdaではなく、スコアリング項目の
-追加（収容人数・最寄り駅距離・料金）以前に発見済みだった既存スタジオへ、これらの
-フィールドを後追いで埋めるための一回限りのメンテナンススクリプト
-（<code>python backfill_studio_details.py [--dry-run]</code>）。discover_studios.py の
-guess_capacity/find_nearest_station_distance_m/fetch_place_website/scrape_price_from_websiteを
-そのまま再利用し、本番のDynamoDBテーブルを直接更新する。
+<b>削除済み:</b> <code>generate_studio_score.py</code>（スコア計算＋AI推薦理由生成のバッチ本体）は、
+AIスコアリング機能の廃止にともない完全に削除した。<code>admin_trigger.py</code>の
+BATCH_FUNCTION_NAME環境変数で切り替えていた「AI分析を実行」用の設定
+（RATE_LIMIT_ACTION=ai-batch）も削除し、現在は「現在地から探す」用の設定のみが残っている。
 </div>
 
-<h3>3.3 SAM関数 ⇔ ハンドラー対応（infrastructure/template.yaml）</h3>
+<h3>3.3 ローカル専用スクリプト（backend/scripts/）</h3>
+
+<table>
+<tr><th>ファイル</th><th>役割</th><th>実行環境</th></tr>
+<tr><td>scrape_availability.py</td><td>4ブランドの公式サイトから空き状況・部屋の広さ・写真・平面図・設備をスクレイピングし、StudiosTable（部屋マスタ）とAvailabilityTableへ書き込む新規スクリプト。BeautifulSoup（BUZZ/NOAH/ミッションの一部は静的HTML）とPlaywright（worcle・ミッションはJS描画が必要）を使い分け。ミッションはbackend/.envの会員ログイン情報でPlaywrightからログイン</td><td>ローカル専用。手動またはローカルのタスクスケジューラで定期実行。クラウドにはデプロイしない</td></tr>
+<tr><td>backfill_studio_details.py</td><td>旧スコアリング項目（収容人数・最寄り駅距離・料金）を発見済みスタジオへ後追いで埋める一回限りのメンテナンススクリプト（旧構成の遺産。詳細は企画・設計アーカイブ.html参照）</td><td>ローカル専用（<code>--dry-run</code>オプションあり）</td></tr>
+<tr><td>delete_yoga_pilates.py</td><td>4ブランド限定以前にGoogle Places発見で混入したヨガ・ピラティス系スタジオをStudiosTableから削除する一回限りのクリーンアップスクリプト</td><td>ローカル専用</td></tr>
+</table>
+
+<h3>3.4 環境変数ファイル（backend/）</h3>
+
+<table>
+<tr><th>ファイル</th><th>内容</th></tr>
+<tr><td>.env.example</td><td>backend/.envに必要な環境変数のテンプレート（新規追加）。<code>MISSION_LOGIN_EMAIL</code>・<code>MISSION_LOGIN_PASSWORD</code>（スタジオミッションの会員ログイン情報）等を含む。Gitにコミットされる</td></tr>
+<tr><td>.env</td><td>実際の会員ログイン情報等を格納するローカル専用ファイル。<code>scrape_availability.py</code>がPlaywrightでのログインに使用。.gitignore対象でコミットされない</td></tr>
+</table>
+
+<h3>3.5 SAM関数 ⇔ ハンドラー対応（infrastructure/template.yaml、抜粋）</h3>
 
 <table>
 <tr><th>SAM論理ID</th><th>Handler指定</th><th>トリガー</th></tr>
-<tr><td>GenerateStudioScoreBatch</td><td>generate_studio_score.handler</td><td>EventBridge（毎日AM6:00 JST）／AdminRunAiBatchFunction経由</td></tr>
+<tr><td>GetStudiosFunction</td><td>handlers.getStudiosHandler</td><td>API Gateway（GET /studios）</td></tr>
+<tr><td>GetStudioAvailabilityFunction</td><td>handlers.getStudioAvailabilityHandler</td><td>API Gateway（GET /studios/{studioId}/availability）</td></tr>
+<tr><td>GetEventsFunction / CreateEventFunction / DeleteEventFunction</td><td>handlers.getEventsHandler / postEventsHandler / deleteEventHandler</td><td>API Gateway（/events系）</td></tr>
+<tr><td>GetRecommendedStudiosFunction</td><td>handlers.getRecommendedStudiosHandler</td><td>API Gateway（GET /recommend-studios）</td></tr>
 <tr><td>DiscoverStudiosBatch</td><td>discover_studios.handler</td><td>AdminRunStudioDiscoveryFunction経由のみ（自動スケジュールなし）</td></tr>
-<tr><td>AdminRunAiBatchFunction</td><td>admin_trigger.handler（BATCH_FUNCTION_NAME=GenerateStudioScoreBatch, RATE_LIMIT_ACTION=ai-batch, RATE_LIMIT_DAILY=3）</td><td>POST /admin/run-ai-batch（認証必須）</td></tr>
 <tr><td>AdminRunStudioDiscoveryFunction</td><td>admin_trigger.handler（BATCH_FUNCTION_NAME=DiscoverStudiosBatch, RATE_LIMIT_ACTION=studio-discovery, RATE_LIMIT_DAILY=10）</td><td>POST /admin/run-studio-discovery（認証必須）</td></tr>
+<tr><td>SendAnalyticsDigestBatch</td><td>send_analytics_digest.handler</td><td>EventBridge（毎日AM6:30 JST）</td></tr>
 </table>
+
+<div class="box">
+<b>削除済みSAMリソース:</b> <code>GenerateStudioScoreBatch</code>・<code>AdminRunAiBatchFunction</code>・
+<code>GetRecommendationsFunction</code>・<code>RecommendationsTable</code>は、AIスコアリング機能の
+廃止にともない<code>template.yaml</code>から完全に削除した。毎日AM6:00 JSTのEventBridgeスケジュール
+（スコア再計算用）も削除した。
+</div>
 
 <div class="box">
 <b>Lambda関数名について:</b> API系・バッチ系とも <code>FunctionName</code> は明示指定せず、
@@ -202,14 +255,21 @@ Lambda関数名はアカウント+リージョンで一意という制約に反�
 
 <table>
 <tr><th>物理名</th><th>論理ID</th><th>キー構成</th><th>書き込み元</th></tr>
-<tr><td>studio-studios</td><td>StudiosTable</td><td>studioId (PK)</td><td>discover_studios.run_discovery, putStudioImageHandler, backfill_studio_details.py（手動）</td></tr>
-<tr><td>studio-recommendations</td><td>RecommendationsTable</td><td>studioId (PK)</td><td>generate_studio_score.py（generateStudioScoreBatch実行時のみ）</td></tr>
+<tr><td>studio-studios</td><td>StudiosTable</td><td>studioId (PK)</td><td>discover_studios.run_discovery, scrape_availability.py（部屋マスタ）, putStudioImageHandler, backfill_studio_details.py（手動、旧構成の遺産）</td></tr>
+<tr><td>studio-availability</td><td>AvailabilityTable</td><td>studioId (PK) + date (SK)</td><td>scrape_availability.py（ローカルから直接put_item）</td></tr>
+<tr><td>studio-events</td><td>EventsTable</td><td>userId (PK) + eventId (SK)</td><td>postEventsHandler / deleteEventHandler（新規テーブル）</td></tr>
 <tr><td>studio-favorites</td><td>FavoritesTable</td><td>userId (PK) + studioId (SK)</td><td>postFavoritesHandler / deleteFavoritesHandler</td></tr>
 <tr><td>studio-posts</td><td>PostsTable</td><td>postId (PK)</td><td>postPostsHandler / putPostHandler / deletePostHandler</td></tr>
 <tr><td>studio-chats</td><td>ChatsTable</td><td>userId (PK) + chatId (SK)</td><td>postChatHandler / deleteChatHandler</td></tr>
-<tr><td>studio-usage</td><td>UsageTable</td><td>userId (PK) + dateKey (SK, 例: "ai-batch#2026-07-29")</td><td>admin_trigger.py / postChatHandler内のcheck_and_increment_daily_usage（ADDによるアトミック加算）。TTL（expiresAt）で翌々日ごろ自動削除</td></tr>
+<tr><td>studio-usage</td><td>UsageTable</td><td>userId (PK) + dateKey (SK, 例: "studio-discovery#2026-07-30")</td><td>admin_trigger.py / postChatHandler内のcheck_and_increment_daily_usage（ADDによるアトミック加算）。TTL（expiresAt）で翌々日ごろ自動削除</td></tr>
 <tr><td>studio-users</td><td>UsersTable</td><td>userId (PK)</td><td>putMyProfileHandler（表示名の作成/更新）。getPostsHandlerがscanして投稿者名の結合に使う</td></tr>
+<tr><td>studio-analytics-events</td><td>AnalyticsEventsTable</td><td>eventId (PK)</td><td>postAnalyticsEventHandler。TTL（expiresAt）で自動削除、sendAnalyticsDigestBatchが読み取り集計</td></tr>
 </table>
+
+<div class="box">
+<b>削除済みテーブル:</b> <code>studio-recommendations</code>（RecommendationsTable）は、
+AIスコアリング機能の廃止にともない完全に削除した。
+</div>
 
 <div class="box">
 S3バケット（<code>studio-search-app-uploads-&lt;アカウントID&gt;</code>）はスタジオ写真・投稿写真・
@@ -220,23 +280,46 @@ CloudFrontのOrigin Access Control経由でのみ読み取り可能な非公開�
 
 <h2>5. データの流れ（代表的なシナリオ）</h2>
 
-<h3>5.1「AI分析を実行」を押したとき</h3>
+<h3>5.1 トップ画面での空き状況確認</h3>
 <pre>
-TopPage.tsx（ボタン）
- → useRecommendations.ts の triggerAiBatch()
- → api/client.ts の runAiBatch()
- → POST /admin/run-ai-batch
- → AdminRunAiBatchFunction (admin_trigger.py)
- → GenerateStudioScoreBatch を非同期invoke
- → generate_studio_score.py の handler()
-    → discover_studios.run_discovery()（新スタジオ探索。新規候補ごとに設備・収容人数推測、
-      最寄り駅検索、公式サイト料金抽出を行いStudiosへ追加）
-    → Studios全件スキャン→スコア計算（最寄り駅距離を使用）→Claude推薦理由生成
-    → Recommendations へ保存
- → フロントは GET /recommendations を定期的にポーリングして完了を検知
+TopPage.tsx（マウント時）
+ → api/client.ts の getStudios() → GET /studios
+ → getStudiosHandler（4ブランドのみフィルタして返却）
+ → StudioCard一覧を表示（ブランド・エリア・広さで絞り込み可能）
+「空き状況を見る」クリック
+ → AvailabilityModal.tsx が開き、日付選択
+ → api/client.ts の getStudioAvailability(studioId, date) → GET /studios/{studioId}/availability
+ → getStudioAvailabilityHandler（AvailabilityTableをget_item。無ければ空データを返す）
+ → 部屋ごとの30分刻みタイムテーブルを表示
 </pre>
 
-<h3>5.2 チャットで写真つきの質問をしたとき</h3>
+<h3>5.2「次のイベント」登録とおすすめ検索</h3>
+<pre>
+EventsPage.tsx（イベント登録フォーム）
+ → api/client.ts の createEvent() → POST /events
+ → postEventsHandler → EventsTableへ保存
+EventsPage.tsx（イベント選択＋目的・日付・時間・利用時間を指定して「おすすめを探す」）
+ → api/client.ts の getRecommendedStudios() → GET /recommend-studios
+ → getRecommendedStudiosHandler
+    → EventsTableから対象イベント取得 → 目的別の必要面積(㎡/人)を算出
+    → StudiosTable全件scanし、広さ条件を満たすroomを抽出
+    → AvailabilityTableで指定日時のslotsを確認し、空きのあるroomのみ残す
+ → 条件を満たす{studio, room}の一覧をEventsPageに表示（スコア付けはしない）
+</pre>
+
+<h3>5.3 空き状況データの収集（ローカル、クラウドを介さない）</h3>
+<pre>
+開発者PCで python backend/scripts/scrape_availability.py を実行（手動 or タスクスケジューラ）
+ → 4ブランドそれぞれの公式サイトへアクセス
+    ・BUZZ/NOAH: BeautifulSoupで静的HTMLを解析（NOAHは一部Playwright併用）
+    ・worcle/ミッション: Playwrightでブラウザを自動操作しJS描画後のDOMを取得
+      （ミッションはbackend/.envのMISSION_LOGIN_EMAIL/PASSWORDで事前ログイン）
+ → 空き状況（30分刻み）・広さ・写真・平面図・設備を取得
+ → ローカルのAWS認証情報でStudiosTable（部屋マスタ）・AvailabilityTableへ直接書き込み
+   （Lambda/API Gatewayを経由しない）
+</pre>
+
+<h3>5.4 チャットで写真つきの質問をしたとき</h3>
 <pre>
 ChatInput.tsx（写真選択 + 送信）
  → useChat.ts の send()
@@ -248,14 +331,15 @@ ChatInput.tsx（写真選択 + 送信）
    → Chatsテーブルへ保存 → 応答を同期的に返却
 </pre>
 
-<h3>5.3「初心者でも通えるスタジオある？」とAI相談で聞いたとき</h3>
+<h3>5.5「初心者でも通えるスタジオある？」とAI相談で聞いたとき</h3>
 <pre>
 ChatInput.tsx（現在地共有トグルON + 送信）
  → useChat.ts の send()（lat/lngを含めてsendChatMessage呼び出し）
  → POST /chat
  → postChatHandler（handlers.py）
-   → _build_studios_context(lat, lng) がStudios・Recommendationsをscan→結合→
+   → _build_studios_context(lat, lng) がStudiosをscan→
      現在地からの距離（haversine）で近い順にソート→上位N件をテキスト化
+     （旧来のスコア・reasonは含まない。Studiosの実データのみ）
    → _generate_chat_reply() のsystem_instructionに上記テキストを埋め込む
      （「データに無いスタジオは作り出さない」という指示も併記）
    → Claudeが実データの中から回答を組み立てる
@@ -266,22 +350,24 @@ ChatInput.tsx（現在地共有トグルON + 送信）
 <div class="box">
 釣行AIアプリと同じAWSアカウント上で運用しているため、AWS側の各サービスは既存分と合算で
 無料枠・低ボリューム内に収まる想定。<b>正確な最新料金は各サービスの公式ページで確認すること</b>
-（料金体系は変更されうるため、あくまで目安）。
+（料金体系は変更されうるため、あくまで目安）。AIスコアリング機能の廃止にともない、
+Claude API・Google Places APIの呼び出し頻度は旧構成よりさらに低くなっている
+（AI相談チャットと「現在地から探す」時のみ）。
 </div>
 
 <table>
 <tr><th>サービス</th><th>課金対象</th><th>個人利用規模での目安</th></tr>
 <tr><td>Lambda</td><td>呼び出し回数・実行時間</td><td>無料枠内（月100万回・40万GB秒まで無料）</td></tr>
 <tr><td>API Gateway (REST)</td><td>APIコール数</td><td>この規模ならごく僅か</td></tr>
-<tr><td>DynamoDB（7テーブル）</td><td>読み書きリクエスト数・ストレージ</td><td>無料枠+低ボリュームでごく僅か</td></tr>
+<tr><td>DynamoDB（8テーブル）</td><td>読み書きリクエスト数・ストレージ</td><td>無料枠+低ボリュームでごく僅か</td></tr>
 <tr><td>S3（静的ホスティング＋アップロード）</td><td>ストレージ・リクエスト数</td><td>数百円未満想定</td></tr>
 <tr><td>CloudFront</td><td>データ転送量</td><td>低ボリュームなら僅か</td></tr>
 <tr><td>SSM Parameter Store</td><td>Standard利用なら無料</td><td>無料</td></tr>
 <tr><td>EventBridge（日次バッチ起動）</td><td>ルール数・イベント数</td><td>無料枠内</td></tr>
 <tr><td>Cognito</td><td>月間アクティブユーザー数</td><td>無料枠内</td></tr>
 <tr><td>AWS Budgets</td><td>予算数</td><td>2つまで無料。今回1つのみ設定</td></tr>
-<tr><td>Anthropic Claude API（Haiku）</td><td>トークン数（画像添付・料金抽出のHTML抜粋は増加）</td><td><b>最も課金リスクが高い部分</b>。無料枠は無く完全従量課金だがHaikuは低単価。AI相談・AI分析・新スタジオ探索へのレート制限で抑制済み</td></tr>
-<tr><td>Google Places API</td><td>リクエスト数（Text Search・Nearby Search・Place Details）</td><td>新規スタジオ発見時のみ複数回課金。既存スタジオでは発生しない</td></tr>
+<tr><td>Anthropic Claude API（Haiku）</td><td>トークン数（画像添付は増加）</td><td>AI相談チャットのみで使用。無料枠は無く完全従量課金だがHaikuは低単価。レート制限で抑制済み</td></tr>
+<tr><td>Google Places API</td><td>リクエスト数（Text Search）</td><td>「現在地から探す」実行時のみ課金。既存スタジオでは発生しない</td></tr>
 <tr><td>Google Maps JavaScript API</td><td>読み込み回数</td><td>低ボリューム</td></tr>
 <tr><td>Cloudflare Workers（ミラー）</td><td>リクエスト数</td><td>無料枠（1日10万リクエスト）で十分</td></tr>
 </table>
@@ -290,12 +376,12 @@ ChatInput.tsx（現在地共有トグルON + 送信）
 AWS側は <code>CostBudget</code>（AWS Budgets、月$10・80%/100%到達時にメール通知）で自動監視している。
 Google Cloud側（Places/Maps）とAnthropic側（Claude）はAWS Budgetsの対象外のため、
 それぞれのコンソールで別途予算アラート・spend limitを手動設定する必要がある
-（README.mdの「10. 利用料アラート」参照）。
+（README.md参照）。
 </div>
 
 <h2>7. 関連ドキュメント</h2>
 <ul>
-<li>企画の背景・釣行AIアプリからの変換経緯: <a href="企画・設計アーカイブ.html">企画・設計アーカイブ.html</a></li>
+<li>企画の背景・方針転換の経緯: <a href="企画・設計アーカイブ.html">企画・設計アーカイブ.html</a></li>
 <li>AWS構成・サービス連携の詳細: <a href="AWS構成・サービス連携.html">AWS構成・サービス連携.html</a></li>
 <li>Lambda単位の詳細仕様: <a href="詳細設計.html">詳細設計.html</a></li>
 <li>非技術者向けの全体像: <a href="アプリまるわかりガイド.html">アプリまるわかりガイド.html</a></li>
